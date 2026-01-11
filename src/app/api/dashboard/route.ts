@@ -12,35 +12,39 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    // Fetch all data in parallel using the service's merged method
+    // Fetch all data using the comprehensive getFullAnalytics method
+    // This fetches: campaigns, analytics, analytics overview, accounts, warmup analytics, tags, tag mappings
     const fullData = await instantlyService.getFullAnalytics();
 
-    // Check for API errors
     if (fullData.error) {
-      console.error('Instantly API error:', fullData.error);
+      console.error('[Dashboard] Instantly API error:', fullData.error);
     }
 
-    // Get the campaigns with analytics already merged
-    const campaignsWithAnalytics = fullData.campaigns;
-    const rawAccounts = fullData.accounts;
+    const { campaigns, analytics, accounts, tags, tagMappings } = fullData;
 
-    console.log(`[Dashboard] Processing ${campaignsWithAnalytics.length} campaigns with analytics`);
-    console.log(`[Dashboard] Processing ${rawAccounts.length} accounts`);
+    console.log(`[Dashboard] Processing ${campaigns.length} campaigns`);
+    console.log(`[Dashboard] Processing ${accounts.length} accounts`);
+    console.log(`[Dashboard] Processing ${tags.length} tags`);
+    console.log(`[Dashboard] Processing ${tagMappings.length} tag mappings`);
 
-    // Log sample analytics to verify data
-    if (campaignsWithAnalytics.length > 0 && campaignsWithAnalytics[0].analytics) {
+    // Log sample data for debugging
+    if (campaigns.length > 0 && campaigns[0].analytics) {
+      const sample = campaigns[0].analytics;
       console.log(`[Dashboard] Sample analytics:`, {
-        campaign: campaignsWithAnalytics[0].name,
-        sent: campaignsWithAnalytics[0].analytics.total_sent,
-        replied: campaignsWithAnalytics[0].analytics.total_replied,
-        opportunities: campaignsWithAnalytics[0].analytics.total_opportunities,
+        campaign: campaigns[0].name,
+        sent: sample.sent,
+        replies: sample.unique_replies,
+        interested: sample.total_interested,
+        meetingBooked: sample.total_meeting_booked,
+        opportunities: sample.total_opportunities,
+        replyRate: sample.reply_rate,
       });
     }
 
     // Transform data into app format
-    const clients = transformCampaignsToClients(campaignsWithAnalytics);
-    const accounts = transformAccounts(rawAccounts, clients);
-    const portfolioMetrics = calculatePortfolioMetrics(clients, accounts);
+    const clients = transformCampaignsToClients(campaigns);
+    const transformedAccounts = transformAccounts(accounts, clients);
+    const portfolioMetrics = calculatePortfolioMetrics(clients, transformedAccounts);
     const tasks = generateTasksFromClassifications(clients);
 
     // Calculate bucket distribution
@@ -51,40 +55,53 @@ export async function GET() {
 
     // Get inbox health summary
     const inboxHealth = {
-      total: accounts.length,
-      connected: accounts.filter(a => a.status === 'connected').length,
-      disconnected: accounts.filter(a => a.status === 'disconnected').length,
-      warmup: accounts.filter(a => a.status === 'warmup').length,
+      total: transformedAccounts.length,
+      connected: transformedAccounts.filter(a => a.status === 'connected').length,
+      disconnected: transformedAccounts.filter(a => a.status === 'disconnected').length,
+      warmup: transformedAccounts.filter(a => a.status === 'warmup').length,
       avgHealth: portfolioMetrics.avgInboxHealth,
+      lowHealth: transformedAccounts.filter(a => a.healthScore < 70).length,
     };
+
+    // All unique tags from accounts
+    const allTags = Array.from(new Set(transformedAccounts.flatMap(a => a.tags))).sort();
 
     // Build response
     const response = {
       clients,
-      accounts,
+      accounts: transformedAccounts,
       portfolioMetrics,
       tasks,
       bucketDistribution,
       inboxHealth,
-      // Include raw analytics for debugging
-      rawAnalyticsSummary: {
-        totalCampaignsWithAnalytics: campaignsWithAnalytics.filter(c => c.analytics).length,
-        totalSentAcrossAll: fullData.analytics.reduce((sum, a) => sum + (a.total_sent || 0), 0),
-        totalRepliesAcrossAll: fullData.analytics.reduce((sum, a) => sum + (a.total_replied || 0), 0),
+      tags,
+      tagMappings,
+      allTags,
+      // Aggregated analytics summary
+      analyticsSummary: {
+        totalSent: analytics.reduce((sum, a) => sum + (a.sent || 0), 0),
+        totalReplies: analytics.reduce((sum, a) => sum + (a.unique_replies || 0), 0),
+        totalOpportunities: analytics.reduce((sum, a) => sum + (a.total_opportunities || 0), 0),
+        totalInterested: analytics.reduce((sum, a) => sum + (a.total_interested || 0), 0),
+        totalMeetingBooked: analytics.reduce((sum, a) => sum + (a.total_meeting_booked || 0), 0),
+        avgReplyRate: analytics.length > 0
+          ? Number((analytics.reduce((sum, a) => sum + (a.reply_rate || 0), 0) / analytics.length).toFixed(2))
+          : 0,
       },
       meta: {
-        campaignCount: campaignsWithAnalytics.length,
-        accountCount: rawAccounts.length,
+        campaignCount: campaigns.length,
+        accountCount: accounts.length,
         clientCount: clients.length,
-        analyticsCount: fullData.analytics.length,
+        analyticsCount: analytics.length,
+        tagCount: tags.length,
         lastUpdated: new Date().toISOString(),
-        source: fullData.error ? 'fallback' : 'instantly',
+        source: fullData.error ? 'partial' : 'instantly',
       },
     };
 
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Dashboard API error:', error);
+    console.error('[Dashboard] API error:', error);
     return NextResponse.json(
       { 
         error: 'Failed to fetch dashboard data',

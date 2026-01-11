@@ -1,14 +1,26 @@
 /**
  * Data Transformer
- * Transforms raw Instantly API data into the app's internal format
+ * Transforms Instantly API data into the app's internal format
  */
 
 import { BENCHMARKS } from "@/lib/engine/benchmarks";
 import { BUCKET_CONFIGS, type IssueBucket, type ClientClassification } from "@/types/analysis";
-import type { InstantlyCampaign, InstantlyAccount, InstantlyCampaignAnalytics } from "./instantly";
+import type { 
+  InstantlyCampaign, 
+  InstantlyAccount, 
+  InstantlyCampaignAnalytics,
+  InstantlyCustomTag,
+  InstantlyTagMapping,
+} from "./instantly";
 
 // Re-export types
-export type { InstantlyCampaign, InstantlyAccount, InstantlyCampaignAnalytics };
+export type { 
+  InstantlyCampaign, 
+  InstantlyAccount, 
+  InstantlyCampaignAnalytics,
+  InstantlyCustomTag,
+  InstantlyTagMapping,
+};
 
 // Transformed types for the app
 export interface TransformedClient {
@@ -31,6 +43,13 @@ export interface TransformedClient {
     leadsCount: number;
     contactedCount: number;
     completedCount: number;
+    // New fields from overview
+    totalInterested: number;
+    totalMeetingBooked: number;
+    totalMeetingCompleted: number;
+    totalClosed: number;
+    positiveReplyRate: number;
+    posReplyToMeeting: number;
   };
   classification: ClientClassification;
   healthScore: number;
@@ -42,37 +61,53 @@ export interface TransformedAccount {
   clientName: string;
   status: "connected" | "disconnected" | "warmup" | "error";
   healthScore: number;
+  healthScoreLabel: string;
   dailySendLimit: number;
   sentToday: number;
   provider: string;
   tags: string[];
   warmupStatus?: string;
   warmupScore: number;
+  landedInbox: number;
+  landedSpam: number;
   sendingError?: boolean;
   errorMessage?: string;
+  lastUsed?: string;
 }
 
 /**
  * Extract client name from campaign name
- * Patterns: "ClientName - Campaign", "ClientName | Campaign", "[ClientName] Campaign"
  */
 export function extractClientName(campaignName: string): string {
+  let name = campaignName;
+  
+  // Remove common prefixes
+  name = name.replace(/^\(barracuda\)\s*/i, '');
+  name = name.replace(/^\(baracuda\)\s*/i, '');
+  
+  // Remove common suffixes
+  name = name.replace(/\s*-\s*RR.*$/i, '');
+  name = name.replace(/\s*RR\s+.*$/i, '');
+  name = name.replace(/\s*V\d+.*$/i, '');
+  name = name.replace(/\s*Trial.*$/i, '');
+  name = name.replace(/\s*Rerun.*$/i, '');
+  name = name.replace(/\s*\(copy\).*$/i, '');
+  name = name.replace(/\s*Recycled.*$/i, '');
+  
   const patterns = [
-    /^(.+?)\s*[-–—|]\s*/,  // "Client - Campaign" or "Client | Campaign"
-    /^\[(.+?)\]\s*/,       // "[Client] Campaign"
-    /^(.+?):\s*/,          // "Client: Campaign"
+    /^(.+?)\s*[-–—|]\s*/,
+    /^\[(.+?)\]\s*/,
+    /^(.+?):\s*/,
   ];
 
   for (const pattern of patterns) {
-    const match = campaignName.match(pattern);
+    const match = name.match(pattern);
     if (match) {
       return match[1].trim();
     }
   }
 
-  // If no pattern matches, use the campaign name as client name
-  // or extract first meaningful words
-  const words = campaignName.split(/\s+/);
+  const words = name.trim().split(/\s+/);
   if (words.length >= 2) {
     return words.slice(0, 2).join(" ");
   }
@@ -109,22 +144,26 @@ export function calculateClientMetrics(
   let totalReplied = 0;
   let totalBounced = 0;
   let opportunities = 0;
-  let opportunityValue = 0;
   let leadsCount = 0;
   let contactedCount = 0;
-  let completedCount = 0;
+  let totalInterested = 0;
+  let totalMeetingBooked = 0;
+  let totalMeetingCompleted = 0;
+  let totalClosed = 0;
 
   campaigns.forEach((campaign) => {
     if (campaign.analytics) {
-      totalSent += campaign.analytics.total_sent || 0;
-      totalOpened += campaign.analytics.total_opened || 0;
-      totalReplied += campaign.analytics.total_replied || 0;
-      totalBounced += campaign.analytics.total_bounced || 0;
+      totalSent += campaign.analytics.sent || campaign.analytics.total_sent || 0;
+      totalOpened += campaign.analytics.unique_opened || campaign.analytics.total_opened || 0;
+      totalReplied += campaign.analytics.unique_replies || campaign.analytics.total_replied || 0;
+      totalBounced += campaign.analytics.bounced || campaign.analytics.total_bounced || 0;
       opportunities += campaign.analytics.total_opportunities || 0;
-      opportunityValue += campaign.analytics.total_opportunity_value || 0;
-      leadsCount += campaign.analytics.leads_count || 0;
-      contactedCount += campaign.analytics.contacted_count || 0;
-      completedCount += campaign.analytics.completed_count || 0;
+      leadsCount += campaign.analytics.total_leads || campaign.analytics.leads_count || 0;
+      contactedCount += campaign.analytics.contacted || campaign.analytics.contacted_count || 0;
+      totalInterested += campaign.analytics.total_interested || 0;
+      totalMeetingBooked += campaign.analytics.total_meeting_booked || 0;
+      totalMeetingCompleted += campaign.analytics.total_meeting_completed || 0;
+      totalClosed += campaign.analytics.total_closed || 0;
     }
   });
 
@@ -132,11 +171,12 @@ export function calculateClientMetrics(
   const openRate = totalSent > 0 ? (totalOpened / totalSent) * 100 : 0;
   const bounceRate = totalSent > 0 ? (totalBounced / totalSent) * 100 : 0;
   
-  // Positive replies = total replies - auto replies (estimate ~20% auto)
-  const positiveReplies = Math.floor(totalReplied * 0.8);
+  // Positive replies = interested responses
+  const positiveReplies = totalInterested > 0 ? totalInterested : Math.floor(totalReplied * 0.5);
   const conversionRate = positiveReplies > 0 ? (opportunities / positiveReplies) * 100 : 0;
+  const positiveReplyRate = totalReplied > 0 ? (totalInterested / totalReplied) * 100 : 0;
+  const posReplyToMeeting = totalInterested > 0 ? (totalMeetingBooked / totalInterested) * 100 : 0;
 
-  // Uncontacted leads
   const uncontactedLeads = Math.max(0, leadsCount - contactedCount);
 
   return {
@@ -151,10 +191,16 @@ export function calculateClientMetrics(
     opportunities,
     conversionRate: Number(conversionRate.toFixed(2)),
     uncontactedLeads,
-    avgInboxHealth: 85, // Default, would be calculated from accounts
+    avgInboxHealth: 85,
     leadsCount,
     contactedCount,
-    completedCount,
+    completedCount: 0,
+    totalInterested,
+    totalMeetingBooked,
+    totalMeetingCompleted,
+    totalClosed,
+    positiveReplyRate: Number(positiveReplyRate.toFixed(2)),
+    posReplyToMeeting: Number(posReplyToMeeting.toFixed(2)),
   };
 }
 
@@ -162,7 +208,7 @@ export function calculateClientMetrics(
  * Classify a client into an issue bucket based on their metrics
  */
 export function classifyClient(clientName: string, metrics: TransformedClient["metrics"]): ClientClassification {
-  const { replyRate, conversionRate, totalSent, uncontactedLeads, avgInboxHealth, bounceRate } = metrics;
+  const { replyRate, conversionRate, totalSent, uncontactedLeads, avgInboxHealth, bounceRate, posReplyToMeeting } = metrics;
 
   let bucket: IssueBucket = "PERFORMING_WELL";
   let severity: "low" | "medium" | "high" | "critical" = "low";
@@ -188,13 +234,13 @@ export function classifyClient(clientName: string, metrics: TransformedClient["m
     severity = replyRate < 0.3 ? "critical" : "high";
     reasoning = [`Reply rate ${replyRate.toFixed(2)}% below critical threshold of ${BENCHMARKS.CRITICAL_REPLY_RATE}%`];
   }
-  // Subsequence Issues - replies but no conversions
-  else if (replyRate >= BENCHMARKS.GOOD_REPLY_RATE && conversionRate < BENCHMARKS.CRITICAL_CONVERSION) {
+  // Subsequence Issues - replies but low positive reply to meeting ratio
+  else if (replyRate >= BENCHMARKS.GOOD_REPLY_RATE && posReplyToMeeting < 40) {
     bucket = "SUBSEQUENCE_ISSUE";
-    severity = conversionRate < 20 ? "high" : "medium";
+    severity = posReplyToMeeting < 20 ? "high" : "medium";
     reasoning = [
-      `Good reply rate (${replyRate.toFixed(2)}%) but low conversion (${conversionRate.toFixed(2)}%)`,
-      "Subsequence emails may need optimization"
+      `Good reply rate (${replyRate.toFixed(2)}%) but low pos-reply-to-meeting (${posReplyToMeeting.toFixed(2)}%)`,
+      "Subsequence emails or booking process needs optimization"
     ];
   }
   // Volume Issues - low send volume
@@ -225,7 +271,6 @@ export function classifyClient(clientName: string, metrics: TransformedClient["m
     reasoning = ["Performance is acceptable but could be improved"];
   }
 
-  // Build metrics that match ClientMetrics type
   const fullMetrics = {
     ...metrics,
     totalReplies: metrics.totalReplied,
@@ -258,25 +303,26 @@ export function classifyClient(clientName: string, metrics: TransformedClient["m
  * Calculate overall health score for a client
  */
 export function calculateHealthScore(metrics: TransformedClient["metrics"]): number {
-  const { replyRate, conversionRate, bounceRate, avgInboxHealth } = metrics;
+  const { replyRate, conversionRate, bounceRate, avgInboxHealth, posReplyToMeeting } = metrics;
   
-  // Weight factors
-  const replyWeight = 0.35;
-  const conversionWeight = 0.25;
-  const bounceWeight = 0.2;
-  const inboxWeight = 0.2;
+  const replyWeight = 0.30;
+  const conversionWeight = 0.20;
+  const bounceWeight = 0.15;
+  const inboxWeight = 0.15;
+  const meetingWeight = 0.20;
 
-  // Normalize scores (0-100)
   const replyScore = Math.min(100, (replyRate / BENCHMARKS.GOOD_REPLY_RATE) * 100);
   const conversionScore = Math.min(100, (conversionRate / BENCHMARKS.TARGET_CONVERSION) * 100);
-  const bounceScore = Math.max(0, 100 - (bounceRate * 10)); // Penalty for high bounce
+  const bounceScore = Math.max(0, 100 - (bounceRate * 10));
   const inboxScore = avgInboxHealth;
+  const meetingScore = Math.min(100, (posReplyToMeeting / 40) * 100);
 
   const healthScore = 
     replyScore * replyWeight +
     conversionScore * conversionWeight +
     bounceScore * bounceWeight +
-    inboxScore * inboxWeight;
+    inboxScore * inboxWeight +
+    meetingScore * meetingWeight;
 
   return Math.round(Math.min(100, Math.max(0, healthScore)));
 }
@@ -305,7 +351,6 @@ export function transformCampaignsToClients(
     });
   });
 
-  // Sort by health score (lowest first for attention)
   return clients.sort((a, b) => a.healthScore - b.healthScore);
 }
 
@@ -314,11 +359,10 @@ export function transformCampaignsToClients(
  */
 export function transformAccounts(accounts: InstantlyAccount[], clients: TransformedClient[]): TransformedAccount[] {
   return accounts.map((account) => {
-    // Try to match account to a client based on email domain or tags
     const emailDomain = account.email.split("@")[1]?.split(".")[0] || "";
     let clientName = "Unknown";
     
-    // Try to find matching client
+    // Try to find matching client by email domain or tags
     for (const client of clients) {
       if (
         client.name.toLowerCase().includes(emailDomain.toLowerCase()) ||
@@ -329,25 +373,37 @@ export function transformAccounts(accounts: InstantlyAccount[], clients: Transfo
       }
     }
 
-    // Calculate health score based on warmup score
-    let healthScore = account.warmup_score || 85;
-    if (account.statusLabel === "disconnected") healthScore = 0;
-    else if (account.statusLabel === "warmup") healthScore = Math.max(60, account.warmup_score || 60);
+    // If account has tags, try matching by tag name
+    if (clientName === "Unknown" && account.tags.length > 0) {
+      for (const client of clients) {
+        if (account.tags.some(tag => 
+          tag.toLowerCase().includes(client.name.toLowerCase()) ||
+          client.name.toLowerCase().includes(tag.toLowerCase())
+        )) {
+          clientName = client.name;
+          break;
+        }
+      }
+    }
 
     return {
       id: account.id || account.email,
       email: account.email,
       clientName,
       status: account.statusLabel,
-      healthScore,
+      healthScore: account.health_score,
+      healthScoreLabel: account.health_score_label,
       dailySendLimit: account.daily_limit || 50,
-      sentToday: 0, // Not available from accounts endpoint
+      sentToday: 0,
       provider: account.providerLabel || "Unknown",
       tags: account.tags || [],
       warmupStatus: account.warmup_enabled ? "active" : "inactive",
       warmupScore: account.warmup_score || 0,
-      sendingError: account.statusLabel === "disconnected",
-      errorMessage: account.statusLabel === "disconnected" ? "Account disconnected" : undefined,
+      landedInbox: account.landed_inbox || 0,
+      landedSpam: account.landed_spam || 0,
+      sendingError: account.has_error,
+      errorMessage: account.error_message,
+      lastUsed: account.last_used,
     };
   });
 }
@@ -362,19 +418,26 @@ export function calculatePortfolioMetrics(clients: TransformedClient[], accounts
   let totalSent = 0;
   let totalReplied = 0;
   let totalOpportunities = 0;
+  let totalInterested = 0;
+  let totalMeetingBooked = 0;
   let healthSum = 0;
 
   clients.forEach(client => {
     totalSent += client.metrics.totalSent;
     totalReplied += client.metrics.totalReplied;
     totalOpportunities += client.metrics.opportunities;
+    totalInterested += client.metrics.totalInterested;
+    totalMeetingBooked += client.metrics.totalMeetingBooked;
     healthSum += client.healthScore;
   });
 
   const avgReplyRate = totalSent > 0 ? (totalReplied / totalSent) * 100 : 0;
   const avgHealthScore = totalClients > 0 ? healthSum / totalClients : 0;
+  const posReplyToMeeting = totalInterested > 0 ? (totalMeetingBooked / totalInterested) * 100 : 0;
 
   const connectedInboxes = accounts.filter(a => a.status === "connected").length;
+  const warmupInboxes = accounts.filter(a => a.status === "warmup").length;
+  const disconnectedInboxes = accounts.filter(a => a.status === "disconnected").length;
   const avgInboxHealth = accounts.length > 0 
     ? accounts.reduce((sum, a) => sum + a.healthScore, 0) / accounts.length 
     : 0;
@@ -385,12 +448,17 @@ export function calculatePortfolioMetrics(clients: TransformedClient[], accounts
     totalSent,
     totalReplied,
     totalOpportunities,
+    totalInterested,
+    totalMeetingBooked,
     avgReplyRate: Number(avgReplyRate.toFixed(2)),
     avgConversionRate: totalReplied > 0 
       ? Number(((totalOpportunities / totalReplied) * 100).toFixed(2))
       : 0,
+    posReplyToMeeting: Number(posReplyToMeeting.toFixed(2)),
     avgHealthScore: Math.round(avgHealthScore),
     activeInboxes: connectedInboxes,
+    warmupInboxes,
+    disconnectedInboxes,
     totalInboxes: accounts.length,
     avgInboxHealth: Math.round(avgInboxHealth),
   };
@@ -407,8 +475,8 @@ const BUCKET_TASKS: Record<IssueBucket, { daily: string[]; weekly: string[] }> =
     weekly: ["Analyze reply patterns", "Update email templates"],
   },
   SUBSEQUENCE_ISSUE: {
-    daily: ["Review subsequence emails", "Check follow-up timing"],
-    weekly: ["Optimize conversion flow", "Review meeting booking process"],
+    daily: ["Review subsequence emails", "Check follow-up timing", "Review booking process"],
+    weekly: ["Optimize conversion flow", "Review meeting booking process", "Check calendar availability"],
   },
   DELIVERABILITY_ISSUE: {
     daily: ["Check inbox health", "Warm up inboxes"],
@@ -459,7 +527,6 @@ export function generateTasksFromClassifications(clients: TransformedClient[]) {
 
     if (!tasks) return;
 
-    // Generate daily tasks for high/critical severity
     if (severity === "critical" || severity === "high") {
       tasks.daily.forEach((taskTitle, index) => {
         daily.push({
@@ -476,7 +543,6 @@ export function generateTasksFromClassifications(clients: TransformedClient[]) {
       });
     }
 
-    // Generate weekly tasks
     tasks.weekly.forEach((taskTitle, index) => {
       weekly.push({
         id: `${client.id}-weekly-${index}`,

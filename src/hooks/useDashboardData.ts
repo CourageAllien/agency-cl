@@ -16,6 +16,19 @@ interface DashboardTask {
   completed: boolean;
 }
 
+interface CustomTag {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+interface TagMapping {
+  id: string;
+  tag_id: string;
+  resource_id: string;
+  resource_type: 'account' | 'campaign';
+}
+
 interface DashboardResponse {
   clients: TransformedClient[];
   accounts: TransformedAccount[];
@@ -25,10 +38,15 @@ interface DashboardResponse {
     totalSent: number;
     totalReplied: number;
     totalOpportunities: number;
+    totalInterested: number;
+    totalMeetingBooked: number;
     avgReplyRate: number;
     avgConversionRate: number;
+    posReplyToMeeting: number;
     avgHealthScore: number;
     activeInboxes: number;
+    warmupInboxes: number;
+    disconnectedInboxes: number;
     totalInboxes: number;
     avgInboxHealth: number;
   };
@@ -43,13 +61,27 @@ interface DashboardResponse {
     disconnected: number;
     warmup: number;
     avgHealth: number;
+    lowHealth: number;
+  };
+  tags: CustomTag[];
+  tagMappings: TagMapping[];
+  allTags: string[];
+  analyticsSummary: {
+    totalSent: number;
+    totalReplies: number;
+    totalOpportunities: number;
+    totalInterested: number;
+    totalMeetingBooked: number;
+    avgReplyRate: number;
   };
   meta: {
     campaignCount: number;
     accountCount: number;
     clientCount: number;
+    analyticsCount: number;
+    tagCount: number;
     lastUpdated: string;
-    source: "instantly" | "fallback";
+    source: "instantly" | "partial" | "fallback";
   };
 }
 
@@ -84,6 +116,7 @@ export function useAccounts() {
   return {
     accounts: data?.accounts || [],
     inboxHealth: data?.inboxHealth,
+    allTags: data?.allTags || [],
     ...rest,
   };
 }
@@ -101,8 +134,19 @@ export function usePortfolioMetrics() {
   const { data, ...rest } = useDashboardData();
   return {
     metrics: data?.portfolioMetrics,
+    analyticsSummary: data?.analyticsSummary,
     ...rest,
   };
 }
 
-export type { DashboardResponse, DashboardTask };
+export function useTags() {
+  const { data, ...rest } = useDashboardData();
+  return {
+    tags: data?.tags || [],
+    tagMappings: data?.tagMappings || [],
+    allTags: data?.allTags || [],
+    ...rest,
+  };
+}
+
+export type { DashboardResponse, DashboardTask, CustomTag, TagMapping };

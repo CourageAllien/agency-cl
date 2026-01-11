@@ -30,19 +30,24 @@ import {
 } from "lucide-react";
 
 export default function InboxesPage() {
-  const { accounts, inboxHealth, isLoading, isError, error, refetch, isFetching } = useAccounts();
+  const { accounts, inboxHealth, allTags, isLoading, isError, error, refetch, isFetching } = useAccounts();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [tagFilter, setTagFilter] = useState<string>("all");
 
-  // Get unique tags from accounts
-  const allTags = useMemo(() => {
+  // Get unique tags from accounts or from API response
+  const uniqueTags = useMemo(() => {
+    // Use allTags from API if available
+    if (allTags && allTags.length > 0) {
+      return allTags;
+    }
+    // Fallback to extracting from accounts
     const tags = new Set<string>();
     accounts.forEach((account) => {
-      account.tags?.forEach((tag) => tags.add(tag));
+      account.tags?.forEach((tag: string) => tags.add(tag));
     });
     return Array.from(tags).sort();
-  }, [accounts]);
+  }, [accounts, allTags]);
 
   const filteredAccounts = useMemo(() => {
     return accounts.filter((account) => {
@@ -204,7 +209,7 @@ export default function InboxesPage() {
           </SelectContent>
         </Select>
         {/* Tag filter - shows when tags are available */}
-        {allTags.length > 0 ? (
+        {uniqueTags.length > 0 ? (
           <Select value={tagFilter} onValueChange={setTagFilter}>
             <SelectTrigger className="w-[160px]">
               <Tag className="h-4 w-4 mr-2" />
@@ -212,7 +217,7 @@ export default function InboxesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Tags</SelectItem>
-              {allTags.map((tag) => (
+              {uniqueTags.map((tag) => (
                 <SelectItem key={tag} value={tag}>
                   {tag}
                 </SelectItem>
@@ -222,7 +227,7 @@ export default function InboxesPage() {
         ) : (
           <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded-md">
             <Tag className="h-3 w-3 inline mr-1" />
-            Tags not available from API
+            No tags available
           </div>
         )}
         {(statusFilter !== "all" || tagFilter !== "all") && (

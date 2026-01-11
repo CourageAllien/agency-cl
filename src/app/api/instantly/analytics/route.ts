@@ -7,21 +7,21 @@ function getMockAnalyticsResponse() {
   const analytics = mockCampaigns.map(c => ({
     campaign_id: c.id,
     campaign_name: c.name,
-    total_sent: c.sent,
-    total_opened: c.opened,
-    total_replied: c.replied,
-    total_bounced: c.bounced,
-    total_unsubscribed: 0,
+    sent: c.sent,
+    unique_opened: c.opened,
+    unique_replies: c.replied,
+    bounced: c.bounced,
+    unsubscribed: 0,
     total_opportunities: c.opportunities,
   }));
 
   const totals = analytics.reduce(
     (acc, campaign) => ({
-      totalSent: acc.totalSent + campaign.total_sent,
-      totalOpened: acc.totalOpened + campaign.total_opened,
-      totalReplied: acc.totalReplied + campaign.total_replied,
-      totalBounced: acc.totalBounced + campaign.total_bounced,
-      totalUnsubscribed: acc.totalUnsubscribed + campaign.total_unsubscribed,
+      totalSent: acc.totalSent + campaign.sent,
+      totalOpened: acc.totalOpened + campaign.unique_opened,
+      totalReplied: acc.totalReplied + campaign.unique_replies,
+      totalBounced: acc.totalBounced + campaign.bounced,
+      totalUnsubscribed: acc.totalUnsubscribed + campaign.unsubscribed,
       opportunities: acc.opportunities + (campaign.total_opportunities || 0),
     }),
     {
@@ -53,7 +53,7 @@ function getMockAnalyticsResponse() {
 
 export async function GET() {
   try {
-    const analyticsRes = await instantlyService.getCampaignAnalytics();
+    const analyticsRes = await instantlyService.getCampaignAnalytics({ exclude_total_leads_count: false });
 
     // If API fails or returns no data, use mock data
     if (analyticsRes.error || !analyticsRes.data?.length) {
@@ -63,14 +63,14 @@ export async function GET() {
 
     const analytics = analyticsRes.data || [];
 
-    // Aggregate totals - using the normalized field names from the service
+    // Aggregate totals - using the correct v2 field names
     const totals = analytics.reduce(
       (acc, campaign) => ({
-        totalSent: acc.totalSent + (campaign.total_sent || 0),
-        totalOpened: acc.totalOpened + (campaign.total_opened || 0),
-        totalReplied: acc.totalReplied + (campaign.total_replied || 0),
-        totalBounced: acc.totalBounced + (campaign.total_bounced || 0),
-        totalUnsubscribed: acc.totalUnsubscribed + (campaign.total_unsubscribed || 0),
+        totalSent: acc.totalSent + (campaign.sent || 0),
+        totalOpened: acc.totalOpened + (campaign.unique_opened || 0),
+        totalReplied: acc.totalReplied + (campaign.unique_replies || 0),
+        totalBounced: acc.totalBounced + (campaign.bounced || 0),
+        totalUnsubscribed: acc.totalUnsubscribed + (campaign.unsubscribed || 0),
         opportunities: acc.opportunities + (campaign.total_opportunities || 0),
       }),
       {

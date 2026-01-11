@@ -660,6 +660,12 @@ class InstantlyService {
     const tags = tagsRes.data || [];
     const tagMappings = tagMappingsRes.data || [];
 
+    // Debug logging
+    console.log(`[Instantly getFullAnalytics] Campaigns: ${campaigns.length}, Analytics: ${rawAnalytics.length}, Accounts: ${accounts.length}, Tags: ${tags.length}`);
+    if (accountsRes.error) {
+      console.error('[Instantly getFullAnalytics] Accounts error:', accountsRes.error);
+    }
+
     // Create lookup maps
     const overviewMap = new Map(rawOverview.map(o => [o.campaign_id, o]));
     const tagMap = new Map(tags.map(t => [t.id, t.name]));
@@ -730,21 +736,25 @@ class InstantlyService {
       };
     });
 
-    // Fetch warmup analytics for health scores
+    // Fetch warmup analytics for health scores (optional - don't fail if this doesn't work)
     if (accounts.length > 0) {
-      const emails = accounts.map(a => a.email);
-      const warmupRes = await this.getWarmupAnalytics(emails);
-      
-      if (warmupRes.data?.aggregate_data) {
-        enrichedAccounts.forEach(account => {
-          const warmup = warmupRes.data?.aggregate_data[account.email];
-          if (warmup) {
-            account.health_score = warmup.health_score || account.warmup_score;
-            account.health_score_label = warmup.health_score_label || `${account.warmup_score}%`;
-            account.landed_inbox = warmup.landed_inbox || 0;
-            account.landed_spam = warmup.landed_spam || 0;
-          }
-        });
+      try {
+        const emails = accounts.map(a => a.email);
+        const warmupRes = await this.getWarmupAnalytics(emails);
+        
+        if (warmupRes.data?.aggregate_data) {
+          enrichedAccounts.forEach(account => {
+            const warmup = warmupRes.data?.aggregate_data[account.email];
+            if (warmup) {
+              account.health_score = warmup.health_score || account.warmup_score;
+              account.health_score_label = warmup.health_score_label || `${account.warmup_score}%`;
+              account.landed_inbox = warmup.landed_inbox || 0;
+              account.landed_spam = warmup.landed_spam || 0;
+            }
+          });
+        }
+      } catch (warmupError) {
+        console.warn('[Instantly API v2] Warmup analytics failed, using defaults:', warmupError);
       }
     }
 

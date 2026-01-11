@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
 
 export async function GET() {
-  const apiKey = process.env.INSTANTLY_API_KEY || '';
-  const baseUrl = process.env.INSTANTLY_API_BASE_URL || 'https://api.instantly.ai/api/v1';
+  const rawApiKey = process.env.INSTANTLY_API_KEY || '';
+  const apiKey = rawApiKey.trim(); // Remove any whitespace/newlines
+  const baseUrl = (process.env.INSTANTLY_API_BASE_URL || 'https://api.instantly.ai/api/v1').trim();
   
   const results: Record<string, unknown> = {
     apiKeySet: !!apiKey,
-    apiKeyLength: apiKey.length,
+    rawApiKeyLength: rawApiKey.length,
+    trimmedApiKeyLength: apiKey.length,
     apiKeyPreview: apiKey ? `${apiKey.substring(0, 8)}...${apiKey.substring(apiKey.length - 8)}` : 'NOT SET',
+    hasNewlineOrWhitespace: rawApiKey !== apiKey,
     baseUrl,
   };
 

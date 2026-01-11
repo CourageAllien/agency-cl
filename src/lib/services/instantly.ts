@@ -3,8 +3,9 @@
  * Handles all API calls to Instantly for campaign and account data
  */
 
-const INSTANTLY_API_KEY = process.env.INSTANTLY_API_KEY || '';
-const INSTANTLY_API_BASE_URL = process.env.INSTANTLY_API_BASE_URL || 'https://api.instantly.ai/api/v1';
+// Trim any whitespace/newlines from the API key
+const INSTANTLY_API_KEY = (process.env.INSTANTLY_API_KEY || '').trim();
+const INSTANTLY_API_BASE_URL = (process.env.INSTANTLY_API_BASE_URL || 'https://api.instantly.ai/api/v1').trim();
 
 interface InstantlyApiResponse<T> {
   data?: T;

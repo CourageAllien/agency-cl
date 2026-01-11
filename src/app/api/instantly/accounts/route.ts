@@ -26,7 +26,7 @@ export async function GET() {
       status: account.status === 'active' ? 'connected' : account.status,
       healthScore: calculateHealthScore(account),
       dailySendLimit: account.daily_limit || 50,
-      sentToday: account.sent_today || 0,
+      sentToday: account.sent_count || 0,
       provider: account.provider || detectProvider(account.email),
       tags: account.tags || [],
       warmupStatus: account.warmup_status,
@@ -62,8 +62,8 @@ function extractClientFromEmail(email: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-function calculateHealthScore(account: { status: string; warmup_status?: string }): number {
-  if (account.status !== 'active') return 0;
+function calculateHealthScore(account: { status?: string; warmup_status?: string }): number {
+  if (!account.status || account.status !== 'active') return 0;
   if (account.warmup_status === 'warming') return 70;
   if (account.warmup_status === 'completed') return 95;
   return 85;

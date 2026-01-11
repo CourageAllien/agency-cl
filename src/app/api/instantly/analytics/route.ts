@@ -58,16 +58,9 @@ function getMockAnalyticsResponse() {
   };
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url);
-    const startDate = searchParams.get('start_date') || undefined;
-    const endDate = searchParams.get('end_date') || undefined;
-
-    const analyticsRes = await instantlyService.getCampaignAnalyticsWithRange(
-      startDate,
-      endDate
-    );
+    const analyticsRes = await instantlyService.getCampaignAnalytics();
 
     // If API fails or returns no data, use mock data
     if (analyticsRes.error || !analyticsRes.data?.length) {

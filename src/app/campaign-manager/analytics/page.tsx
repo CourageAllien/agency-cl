@@ -757,12 +757,8 @@ export default function AnalyticsPage() {
               <CardContent>
                 <div className="space-y-6">
                   {benchmarkComparisons.map((item) => {
-                    const isAboveBenchmark = item.invertComparison 
-                      ? item.value > item.benchmark 
-                      : item.value >= item.benchmark;
-                    const isCritical = item.invertComparison
-                      ? item.value < item.criticalBenchmark
-                      : item.value < item.criticalBenchmark;
+                    const isAboveBenchmark = item.value >= item.benchmark;
+                    const isCritical = item.value < item.criticalBenchmark;
                     
                     const displayValue = item.isPercentage ? item.value.toFixed(2) : formatNumber(item.value);
                     const displayBenchmark = item.isPercentage ? item.benchmark : formatNumber(item.benchmark);

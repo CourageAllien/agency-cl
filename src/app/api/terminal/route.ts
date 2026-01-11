@@ -46,7 +46,7 @@ export async function POST(request: Request) {
           clientName: t.clientName,
           title: t.title,
           description: t.description || '',
-          status: t.status,
+          status: t.completed ? 'completed' : 'pending',
           completedAt: t.completedAt,
         })),
         ...tasks.weekly.map((t) => ({
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
           clientName: t.clientName,
           title: t.title,
           description: t.description || '',
-          status: t.status,
+          status: t.completed ? 'completed' : 'pending',
           completedAt: t.completedAt,
         })),
       ],

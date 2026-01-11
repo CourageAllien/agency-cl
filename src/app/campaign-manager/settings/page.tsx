@@ -50,9 +50,24 @@ interface CustomBenchmark {
   description: string;
 }
 
+interface BenchmarkState {
+  criticalReplyRate: number;
+  lowReplyRate: number;
+  goodReplyRate: number;
+  criticalConversion: number;
+  targetConversion: number;
+  aspirationalConversion: number;
+  criticalUncontacted: number;
+  warningUncontacted: number;
+  earlyStage: number;
+  viableThreshold: number;
+  tamExhausted: number;
+  healthyInbox: number;
+}
+
 export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
-  const [benchmarks, setBenchmarks] = useState({
+  const [benchmarks, setBenchmarks] = useState<BenchmarkState>({
     criticalReplyRate: BENCHMARKS.CRITICAL_REPLY_RATE,
     lowReplyRate: BENCHMARKS.LOW_REPLY_RATE,
     goodReplyRate: BENCHMARKS.GOOD_REPLY_RATE,

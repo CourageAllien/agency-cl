@@ -1,65 +1,119 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { getMockClassifications } from "@/lib/mock-data";
+import { useClients } from "@/hooks/useDashboardData";
 import { BUCKET_CONFIGS, type IssueBucket } from "@/types/analysis";
-import { formatNumber, formatPercentage, calculateHealthScore } from "@/lib/utils";
+import { formatNumber, formatPercentage } from "@/lib/utils";
 import {
   Search,
-  Users,
   TrendingUp,
   TrendingDown,
-  Mail,
-  Target,
   MoreVertical,
   ExternalLink,
-  ChevronRight,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 
 export default function ClientsPage() {
   const router = useRouter();
-  const classifications = getMockClassifications();
+  const { clients, isLoading, isError, error, refetch, isFetching } = useClients();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBucket, setSelectedBucket] = useState<IssueBucket | "all">("all");
 
-  const filteredClients = classifications.filter((client) => {
-    const matchesSearch = client.clientName
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-    const matchesBucket =
-      selectedBucket === "all" || client.bucket === selectedBucket;
-    return matchesSearch && matchesBucket;
-  });
+  const filteredClients = useMemo(() => {
+    return clients.filter((client) => {
+      const matchesSearch = client.name
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase());
+      const matchesBucket =
+        selectedBucket === "all" || client.classification.bucket === selectedBucket;
+      return matchesSearch && matchesBucket;
+    });
+  }, [clients, searchQuery, selectedBucket]);
 
-  const bucketCounts = classifications.reduce((acc, client) => {
-    acc[client.bucket] = (acc[client.bucket] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const bucketCounts = useMemo(() => {
+    return clients.reduce((acc, client) => {
+      acc[client.classification.bucket] = (acc[client.classification.bucket] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [clients]);
 
   const handleClientClick = (clientId: string) => {
     router.push(`/campaign-manager/clients/${clientId}`);
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="space-y-6 p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <Skeleton className="h-8 w-32" />
+            <Skeleton className="mt-2 h-4 w-48" />
+          </div>
+          <Skeleton className="h-10 w-40" />
+        </div>
+        <Skeleton className="h-10 w-64" />
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[...Array(6)].map((_, i) => (
+            <Card key={i} className="border-border bg-card/50">
+              <CardContent className="p-4">
+                <Skeleton className="h-6 w-32 mb-2" />
+                <Skeleton className="h-4 w-24 mb-4" />
+                <Skeleton className="h-2 w-full mb-4" />
+                <div className="grid grid-cols-2 gap-2">
+                  <Skeleton className="h-12" />
+                  <Skeleton className="h-12" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 p-12">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <h2 className="text-xl font-semibold">Failed to load clients</h2>
+        <p className="text-muted-foreground">{error?.message || "Unknown error"}</p>
+        <Button onClick={() => refetch()} variant="outline" className="gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Clients</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-foreground">Clients</h1>
+            {isFetching && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
           <p className="text-muted-foreground">
-            {classifications.length} clients with auto-classifications
+            {clients.length} clients with auto-classifications
           </p>
         </div>
-        <Button variant="outline" className="gap-2">
-          <ExternalLink className="h-4 w-4" />
-          Open in Instantly
+        <Button variant="outline" className="gap-2" asChild>
+          <a href="https://app.instantly.ai" target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="h-4 w-4" />
+            Open in Instantly
+          </a>
         </Button>
       </div>
 
@@ -80,12 +134,12 @@ export default function ClientsPage() {
             size="sm"
             onClick={() => setSelectedBucket("all")}
           >
-            All ({classifications.length})
+            All ({clients.length})
           </Button>
-          {Object.entries(BUCKET_CONFIGS)
-            .sort((a, b) => a[1].priority - b[1].priority)
-            .filter(([bucket]) => bucketCounts[bucket])
-            .map(([bucket, config]) => (
+          {Object.entries(BUCKET_CONFIGS).map(([bucket, config]) => {
+            const count = bucketCounts[bucket] || 0;
+            if (count === 0) return null;
+            return (
               <Button
                 key={bucket}
                 variant={selectedBucket === bucket ? "default" : "outline"}
@@ -93,170 +147,134 @@ export default function ClientsPage() {
                 onClick={() => setSelectedBucket(bucket as IssueBucket)}
                 className="gap-1"
               >
-                <span>{config.icon}</span>
-                <span>{config.label}</span>
+                {config.icon} {config.label}
                 <Badge variant="secondary" className="ml-1 text-xs">
-                  {bucketCounts[bucket]}
+                  {count}
                 </Badge>
               </Button>
-            ))}
+            );
+          })}
         </div>
       </div>
 
-      {/* Clients Grid */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {filteredClients.map((client) => {
-          const config = BUCKET_CONFIGS[client.bucket];
-          const healthScore = calculateHealthScore({
-            replyRate: client.metrics.replyRate,
-            conversionRate: client.metrics.conversionRate,
-            avgInboxHealth: client.metrics.avgInboxHealth,
-            uncontactedLeads: client.metrics.uncontactedLeads,
-          });
-
-          return (
-            <Card
-              key={client.clientId}
-              onClick={() => handleClientClick(client.clientId)}
-              className={cn(
-                "group cursor-pointer border transition-all hover:shadow-lg hover:scale-[1.01]",
-                config.borderColor
-              )}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-lg text-lg",
-                        config.bgColor
-                      )}
-                    >
-                      {config.icon}
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">
-                        {client.clientName}
-                      </CardTitle>
-                      <Badge
-                        variant="outline"
-                        className={cn("mt-1 text-xs", config.color)}
+      {/* Client Cards */}
+      {filteredClients.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">No clients found matching your criteria.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredClients.map((client) => {
+            const config = BUCKET_CONFIGS[client.classification.bucket];
+            const trendUp = client.metrics.replyRate >= 1;
+            
+            return (
+              <Card
+                key={client.id}
+                className={cn(
+                  "border-border bg-card/50 backdrop-blur-sm cursor-pointer transition-all hover:border-primary/50 hover:shadow-lg",
+                  client.classification.severity === "critical" && "border-red-500/30",
+                  client.classification.severity === "high" && "border-orange-500/30"
+                )}
+                onClick={() => handleClientClick(client.id)}
+              >
+                <CardContent className="p-4">
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={cn(
+                          "p-2 rounded-lg",
+                          config.color === "destructive" && "bg-red-500/10 text-red-500",
+                          config.color === "warning" && "bg-yellow-500/10 text-yellow-500",
+                          config.color === "success" && "bg-green-500/10 text-green-500",
+                          config.color === "secondary" && "bg-muted text-muted-foreground"
+                        )}
                       >
-                        {config.label}
-                      </Badge>
+                        {config.icon}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-foreground">{client.name}</h3>
+                        <Badge
+                          variant={
+                            config.color === "destructive"
+                              ? "destructive"
+                              : config.color === "success"
+                              ? "default"
+                              : "secondary"
+                          }
+                          className="text-xs mt-1"
+                        >
+                          {config.label}
+                        </Badge>
+                      </div>
                     </div>
-                  </div>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // Could add a menu here
-                    }}
-                  >
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Health Score */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Health Score</span>
-                    <span
-                      className={cn(
-                        "font-medium",
-                        healthScore >= 70
-                          ? "text-green-400"
-                          : healthScore >= 40
-                          ? "text-yellow-400"
-                          : "text-red-400"
-                      )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Menu would go here
+                      }}
                     >
-                      {healthScore}%
-                    </span>
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <Progress
-                    value={healthScore}
-                    className="h-2"
-                    indicatorClassName={cn(
-                      healthScore >= 70
-                        ? "bg-green-500"
-                        : healthScore >= 40
-                        ? "bg-yellow-500"
-                        : "bg-red-500"
-                    )}
-                  />
-                </div>
 
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-lg bg-muted/50 p-2">
-                    <div className="text-muted-foreground">Reply Rate</div>
-                    <div className="flex items-center gap-1 font-medium text-foreground">
-                      {formatPercentage(client.metrics.replyRate)}
-                      {client.metrics.replyRate >= 1 ? (
-                        <TrendingUp className="h-3 w-3 text-green-400" />
-                      ) : (
-                        <TrendingDown className="h-3 w-3 text-red-400" />
+                  {/* Health Score */}
+                  <div className="mb-4">
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-muted-foreground">Health Score</span>
+                      <span className="font-medium">{client.healthScore}%</span>
+                    </div>
+                    <Progress
+                      value={client.healthScore}
+                      className={cn(
+                        "h-2",
+                        client.healthScore >= 70 && "[&>div]:bg-green-500",
+                        client.healthScore >= 40 && client.healthScore < 70 && "[&>div]:bg-yellow-500",
+                        client.healthScore < 40 && "[&>div]:bg-red-500"
                       )}
-                    </div>
+                    />
                   </div>
-                  <div className="rounded-lg bg-muted/50 p-2">
-                    <div className="text-muted-foreground">Conversion</div>
-                    <div className="font-medium text-foreground">
-                      {formatPercentage(client.metrics.conversionRate)}
-                    </div>
-                  </div>
-                  <div className="rounded-lg bg-muted/50 p-2">
-                    <div className="text-muted-foreground">Leads Left</div>
-                    <div className="font-medium text-foreground">
-                      {formatNumber(client.metrics.uncontactedLeads)}
-                    </div>
-                  </div>
-                  <div className="rounded-lg bg-muted/50 p-2">
-                    <div className="text-muted-foreground">Opportunities</div>
-                    <div className="font-medium text-foreground">
-                      {client.metrics.opportunities}
-                    </div>
-                  </div>
-                </div>
 
-                {/* Reason */}
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">
-                    {client.reason}
-                  </p>
-                </div>
-
-                {/* Footer */}
-                <div className="flex items-center justify-between border-t border-border pt-3">
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Mail className="h-3 w-3" />
-                      {client.metrics.activeInboxes} inboxes
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Target className="h-3 w-3" />
-                      {client.metrics.activeCampaigns} campaigns
-                    </span>
+                  {/* Metrics */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-muted/30 rounded-lg p-2">
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                        Reply Rate
+                        {trendUp ? (
+                          <TrendingUp className="h-3 w-3 text-green-500" />
+                        ) : (
+                          <TrendingDown className="h-3 w-3 text-red-500" />
+                        )}
+                      </div>
+                      <div className="font-semibold">
+                        {formatPercentage(client.metrics.replyRate)}
+                      </div>
+                    </div>
+                    <div className="bg-muted/30 rounded-lg p-2">
+                      <div className="text-xs text-muted-foreground mb-1">Conversion</div>
+                      <div className="font-semibold">
+                        {formatPercentage(client.metrics.conversionRate)}
+                      </div>
+                    </div>
+                    <div className="bg-muted/30 rounded-lg p-2">
+                      <div className="text-xs text-muted-foreground mb-1">Total Sent</div>
+                      <div className="font-semibold">
+                        {formatNumber(client.metrics.totalSent)}
+                      </div>
+                    </div>
+                    <div className="bg-muted/30 rounded-lg p-2">
+                      <div className="text-xs text-muted-foreground mb-1">Opportunities</div>
+                      <div className="font-semibold">{client.metrics.opportunities}</div>
+                    </div>
                   </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      {filteredClients.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <Users className="mb-3 h-12 w-12 text-muted-foreground" />
-          <p className="text-lg font-medium text-foreground">No clients found</p>
-          <p className="text-sm text-muted-foreground">
-            Try adjusting your search or filter criteria
-          </p>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

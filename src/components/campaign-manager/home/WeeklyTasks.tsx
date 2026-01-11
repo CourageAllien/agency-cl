@@ -1,30 +1,44 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { getMockTasks } from "@/lib/mock-data";
-import { CATEGORY_LABELS, SEVERITY_STYLES } from "@/types/task";
-import { Calendar, TrendingUp } from "lucide-react";
+import { BUCKET_CONFIGS, type IssueBucket } from "@/types/analysis";
+import { Calendar, AlertCircle } from "lucide-react";
+
+interface WeeklyTask {
+  id: string;
+  title: string;
+  description: string;
+  clientId: string;
+  clientName: string;
+  bucket: IssueBucket;
+  priority: "low" | "medium" | "high" | "critical";
+  dueDate: string;
+  completed: boolean;
+}
 
 interface WeeklyTasksProps {
   filterClient?: string;
+  tasks?: WeeklyTask[];
 }
 
-export function WeeklyTasks({ filterClient = "all" }: WeeklyTasksProps) {
-  const { weekly: allWeekly } = getMockTasks();
-  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+export function WeeklyTasks({ filterClient = "all", tasks = [] }: WeeklyTasksProps) {
+  const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
 
-  const weekly = useMemo(() => {
-    if (filterClient === "all") return allWeekly;
-    return allWeekly.filter((t) => t.clientName === filterClient);
-  }, [allWeekly, filterClient]);
+  const filteredTasks = useMemo(() => {
+    let result = tasks;
+    if (filterClient !== "all") {
+      result = result.filter((t) => t.clientName === filterClient);
+    }
+    return result;
+  }, [tasks, filterClient]);
 
   const toggleTask = (taskId: string) => {
-    setCompletedIds((prev) => {
+    setCompletedTasks((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(taskId)) {
         newSet.delete(taskId);
@@ -35,118 +49,78 @@ export function WeeklyTasks({ filterClient = "all" }: WeeklyTasksProps) {
     });
   };
 
-  const pendingTasks = weekly.filter((t) => !completedIds.has(t.id));
-  const completedTasks = weekly.filter((t) => completedIds.has(t.id));
-
-  // Get end of week
-  const now = new Date();
-  const daysUntilFriday = (5 - now.getDay() + 7) % 7 || 7;
-  const friday = new Date(now.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000);
-  const formattedFriday = friday.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
+  const completedCount = filteredTasks.filter(
+    (t) => t.completed || completedTasks.has(t.id)
+  ).length;
 
   return (
-    <Card className="border-border bg-card">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Calendar className="h-5 w-5 text-blue-400" />
-            Weekly Review
-          </CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Due by {formattedFriday}
-          </p>
+    <Card className="border-border bg-card/50 backdrop-blur-sm">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-purple-400" />
+            <CardTitle className="text-lg font-semibold">Weekly Tasks</CardTitle>
+          </div>
+          <Badge variant="secondary" className="text-xs">
+            {completedCount}/{filteredTasks.length} done
+          </Badge>
         </div>
-        <Badge variant="info" className="text-xs">
-          {pendingTasks.length} items
-        </Badge>
       </CardHeader>
-
       <CardContent>
-        <ScrollArea className="h-[400px] pr-4">
-          {pendingTasks.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Calendar className="mb-3 h-12 w-12 text-muted-foreground" />
-              <p className="text-lg font-medium text-foreground">
-                {filterClient === "all" ? "No weekly tasks" : "No weekly tasks for this client"}
-              </p>
-            </div>
-          ) : (
+        {filteredTasks.length === 0 ? (
+          <p className="text-muted-foreground text-center py-8 text-sm">
+            No weekly tasks scheduled.
+          </p>
+        ) : (
+          <ScrollArea className="h-[200px] pr-4">
             <div className="space-y-3">
-              {pendingTasks.map((task, index) => {
-                const styles = SEVERITY_STYLES[task.severity];
+              {filteredTasks.map((task) => {
+                const isCompleted = task.completed || completedTasks.has(task.id);
+                const config = BUCKET_CONFIGS[task.bucket];
                 return (
                   <div
                     key={task.id}
                     className={cn(
-                      "rounded-lg border border-border p-4 transition-all duration-200",
-                      "animate-fadeIn border-l-4",
-                      styles.border,
-                      styles.bg
+                      "flex items-start gap-3 p-3 rounded-lg border transition-all",
+                      isCompleted
+                        ? "bg-muted/30 border-border opacity-60"
+                        : "bg-card border-border hover:border-primary/30"
                     )}
-                    style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={completedIds.has(task.id)}
-                        onCheckedChange={() => toggleTask(task.id)}
-                        className="mt-0.5"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex items-center gap-2">
-                          <span className="font-medium text-foreground">
-                            {task.title}
-                          </span>
-                        </div>
-                        <p className="mb-3 text-sm text-muted-foreground">
-                          {task.description}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          <Badge variant="secondary" className="text-xs">
-                            {CATEGORY_LABELS[task.category] || task.category}
-                          </Badge>
-                          {filterClient === "all" && (
-                            <Badge variant="outline" className="text-xs text-muted-foreground">
-                              {task.clientName}
-                            </Badge>
+                    <Checkbox
+                      checked={isCompleted}
+                      onCheckedChange={() => toggleTask(task.id)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span
+                          className={cn(
+                            "text-sm font-medium",
+                            isCompleted && "line-through text-muted-foreground"
                           )}
-                          {task.category === "trends" && (
-                            <Badge variant="warning" className="flex items-center gap-1 text-xs">
-                              <TrendingUp className="h-3 w-3" />
-                              Trend
-                            </Badge>
-                          )}
-                        </div>
+                        >
+                          {task.title}
+                        </span>
+                        {task.priority === "high" && (
+                          <AlertCircle className="h-3 w-3 text-orange-500" />
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          {task.clientName}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          Due: {new Date(task.dueDate).toLocaleDateString()}
+                        </span>
                       </div>
                     </div>
                   </div>
                 );
               })}
-
-              {completedTasks.length > 0 && (
-                <details className="mt-4">
-                  <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
-                    {completedTasks.length} completed this week
-                  </summary>
-                  <div className="mt-3 space-y-2">
-                    {completedTasks.map((task) => (
-                      <div
-                        key={task.id}
-                        className="flex items-center gap-2 text-sm text-muted-foreground line-through opacity-60"
-                      >
-                        <Checkbox checked disabled className="opacity-50" />
-                        {task.title}
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
             </div>
-          )}
-        </ScrollArea>
+          </ScrollArea>
+        )}
       </CardContent>
     </Card>
   );

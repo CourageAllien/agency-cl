@@ -101,15 +101,22 @@ class InstantlyService {
   // ============ CAMPAIGNS ============
 
   /**
-   * Get all campaigns (v2 API returns { items: Campaign[] })
+   * Get all campaigns (v2 API may return { items: Campaign[] } or Campaign[] directly)
    */
   async getCampaigns(): Promise<InstantlyApiResponse<InstantlyCampaign[]>> {
-    const response = await this.request<{ items: InstantlyCampaign[] }>('/campaigns', {
+    const response = await this.request<{ items?: InstantlyCampaign[] } | InstantlyCampaign[]>('/campaigns', {
       method: 'GET',
     });
-    // Transform v2 response format
+    // Transform v2 response format - handle both array and {items: []} formats
     if (response.data) {
-      return { data: response.data.items, status: response.status };
+      if (Array.isArray(response.data)) {
+        return { data: response.data, status: response.status };
+      }
+      if (response.data.items) {
+        return { data: response.data.items, status: response.status };
+      }
+      // Fallback - treat as array
+      return { data: [], status: response.status };
     }
     return { error: response.error, status: response.status };
   }
@@ -171,15 +178,22 @@ class InstantlyService {
   // ============ ACCOUNTS (INBOXES) ============
 
   /**
-   * Get all email accounts (v2 API)
+   * Get all email accounts (v2 API may return { items: Account[] } or Account[] directly)
    */
   async getAccounts(): Promise<InstantlyApiResponse<InstantlyAccount[]>> {
-    const response = await this.request<{ items: InstantlyAccount[] }>('/accounts', {
+    const response = await this.request<{ items?: InstantlyAccount[] } | InstantlyAccount[]>('/accounts', {
       method: 'GET',
     });
-    // Transform v2 response format
+    // Transform v2 response format - handle both array and {items: []} formats
     if (response.data) {
-      return { data: response.data.items, status: response.status };
+      if (Array.isArray(response.data)) {
+        return { data: response.data, status: response.status };
+      }
+      if (response.data.items) {
+        return { data: response.data.items, status: response.status };
+      }
+      // Fallback - treat as array
+      return { data: [], status: response.status };
     }
     return { error: response.error, status: response.status };
   }

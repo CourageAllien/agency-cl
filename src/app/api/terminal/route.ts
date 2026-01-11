@@ -1,7 +1,33 @@
 import { NextResponse } from 'next/server';
 import { claudeService, type TerminalQueryContext } from '@/lib/services/claude';
-import { getMockClassifications, getMockTasks, mockAccounts } from '@/lib/mock-data';
 import { BENCHMARKS } from '@/lib/engine/benchmarks';
+import { BUCKET_CONFIGS } from '@/types/analysis';
+
+// Fetch dashboard data internally
+async function getDashboardData() {
+  try {
+    // Use the dashboard API directly for server-side
+    const { instantlyService } = await import('@/lib/services/instantly');
+    const { transformCampaignsToClients, transformAccounts, generateTasksFromClassifications } = await import('@/lib/services/dataTransformer');
+    
+    const [campaignsRes, accountsRes] = await Promise.all([
+      instantlyService.getCampaigns(),
+      instantlyService.getAccounts(),
+    ]);
+    
+    const rawCampaigns = campaignsRes.data || [];
+    const rawAccounts = accountsRes.data || [];
+    
+    const clients = transformCampaignsToClients(rawCampaigns);
+    const accounts = transformAccounts(rawAccounts, clients);
+    const tasks = generateTasksFromClassifications(clients);
+    
+    return { clients, accounts, tasks, success: true };
+  } catch (error) {
+    console.error('Failed to fetch dashboard data for terminal:', error);
+    return { clients: [], accounts: [], tasks: { daily: [], weekly: [] }, success: false };
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -15,16 +41,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Build context from current data
-    // In production, this would come from real API data
-    const classifications = getMockClassifications();
-    const tasks = getMockTasks();
-    const accounts = mockAccounts;
+    // Fetch real data from dashboard
+    const dashboardData = await getDashboardData();
+    const { clients, accounts, tasks } = dashboardData;
 
     const context: TerminalQueryContext = {
-      clients: classifications.map((c) => ({
-        name: c.clientName,
-        bucket: c.bucket,
+      clients: clients.map((c) => ({
+        name: c.name,
+        bucket: c.classification.bucket,
         replyRate: c.metrics.replyRate,
         conversionRate: c.metrics.conversionRate,
         opportunities: c.metrics.opportunities,
@@ -47,7 +71,7 @@ export async function POST(request: Request) {
           title: t.title,
           description: t.description || '',
           status: t.completed ? 'completed' : 'pending',
-          completedAt: t.completedAt,
+          completedAt: undefined,
         })),
         ...tasks.weekly.map((t) => ({
           id: t.id,
@@ -55,7 +79,7 @@ export async function POST(request: Request) {
           title: t.title,
           description: t.description || '',
           status: t.completed ? 'completed' : 'pending',
-          completedAt: t.completedAt,
+          completedAt: undefined,
         })),
       ],
       benchmarks: {
@@ -105,6 +129,7 @@ export async function POST(request: Request) {
       response: result.response,
       data: result.data,
       timestamp: new Date().toISOString(),
+      dataSource: dashboardData.success ? 'instantly' : 'fallback',
     });
   } catch (error) {
     console.error('Terminal API error:', error);

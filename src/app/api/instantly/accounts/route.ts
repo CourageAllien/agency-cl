@@ -1,15 +1,21 @@
 import { NextResponse } from 'next/server';
 import { instantlyService } from '@/lib/services/instantly';
+import { mockAccounts } from '@/lib/mock-data';
 
 export async function GET() {
   try {
     const accountsRes = await instantlyService.getAccounts();
 
-    if (accountsRes.error) {
-      return NextResponse.json(
-        { error: accountsRes.error },
-        { status: 500 }
-      );
+    // If API fails or returns no data, use mock data
+    if (accountsRes.error || !accountsRes.data?.length) {
+      console.log('Using mock account data. API error:', accountsRes.error);
+      return NextResponse.json({
+        accounts: mockAccounts,
+        total: mockAccounts.length,
+        connected: mockAccounts.filter((a) => a.status === 'connected').length,
+        disconnected: mockAccounts.filter((a) => a.status !== 'connected').length,
+        source: 'mock',
+      });
     }
 
     // Transform accounts to match our expected format
@@ -31,13 +37,18 @@ export async function GET() {
       total: accounts.length,
       connected: accounts.filter((a) => a.status === 'connected').length,
       disconnected: accounts.filter((a) => a.status !== 'connected').length,
+      source: 'instantly',
     });
   } catch (error) {
     console.error('Error fetching accounts:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch accounts' },
-      { status: 500 }
-    );
+    // Fallback to mock data
+    return NextResponse.json({
+      accounts: mockAccounts,
+      total: mockAccounts.length,
+      connected: mockAccounts.filter((a) => a.status === 'connected').length,
+      disconnected: mockAccounts.filter((a) => a.status !== 'connected').length,
+      source: 'mock',
+    });
   }
 }
 

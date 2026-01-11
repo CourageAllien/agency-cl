@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { instantlyService } from '@/lib/services/instantly';
+import { mockCampaigns } from '@/lib/mock-data';
 
 export async function GET() {
   try {
@@ -8,11 +9,31 @@ export async function GET() {
       instantlyService.getCampaignAnalytics(),
     ]);
 
-    if (campaignsRes.error || analyticsRes.error) {
-      return NextResponse.json(
-        { error: campaignsRes.error || analyticsRes.error },
-        { status: 500 }
-      );
+    // If API fails or returns no data, use mock data
+    if (campaignsRes.error || !campaignsRes.data?.length) {
+      console.log('Using mock campaign data. API error:', campaignsRes.error);
+      return NextResponse.json({
+        campaigns: mockCampaigns.map(c => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          analytics: {
+            campaign_id: c.id,
+            campaign_name: c.name,
+            total_sent: c.sent,
+            total_opened: c.opened,
+            total_replied: c.replied,
+            total_bounced: c.bounced,
+            total_unsubscribed: 0,
+            positive_replies: c.positiveReplies,
+            opportunities: c.opportunities,
+          },
+        })),
+        total: mockCampaigns.length,
+        source: 'mock',
+      });
     }
 
     // Combine campaigns with their analytics
@@ -29,12 +50,32 @@ export async function GET() {
     return NextResponse.json({
       campaigns: campaignsWithAnalytics,
       total: campaignsWithAnalytics.length,
+      source: 'instantly',
     });
   } catch (error) {
     console.error('Error fetching campaigns:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch campaigns' },
-      { status: 500 }
-    );
+    // Fallback to mock data
+    return NextResponse.json({
+      campaigns: mockCampaigns.map(c => ({
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        analytics: {
+          campaign_id: c.id,
+          campaign_name: c.name,
+          total_sent: c.sent,
+          total_opened: c.opened,
+          total_replied: c.replied,
+          total_bounced: c.bounced,
+          total_unsubscribed: 0,
+          positive_replies: c.positiveReplies,
+          opportunities: c.opportunities,
+        },
+      })),
+      total: mockCampaigns.length,
+      source: 'mock',
+    });
   }
 }

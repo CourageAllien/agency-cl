@@ -66,10 +66,11 @@ class InstantlyService {
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<InstantlyApiResponse<T>> {
     try {
-      const url = `${this.baseUrl}${endpoint}`;
+      // Instantly API uses api_key as query parameter
+      const separator = endpoint.includes('?') ? '&' : '?';
+      const url = `${this.baseUrl}${endpoint}${separator}api_key=${this.apiKey}`;
       const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
         ...options.headers,
       };
 

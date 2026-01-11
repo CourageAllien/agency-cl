@@ -5,7 +5,8 @@
 
 // Trim any whitespace/newlines from the API key
 const INSTANTLY_API_KEY = (process.env.INSTANTLY_API_KEY || '').trim();
-const INSTANTLY_API_BASE_URL = (process.env.INSTANTLY_API_BASE_URL || 'https://api.instantly.ai/api/v1').trim();
+// Use v2 API with Bearer token authentication
+const INSTANTLY_API_BASE_URL = (process.env.INSTANTLY_API_BASE_URL || 'https://api.instantly.ai/api/v2').trim();
 
 interface InstantlyApiResponse<T> {
   data?: T;
@@ -67,11 +68,11 @@ class InstantlyService {
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<InstantlyApiResponse<T>> {
     try {
-      // Instantly API uses api_key as query parameter
-      const separator = endpoint.includes('?') ? '&' : '?';
-      const url = `${this.baseUrl}${endpoint}${separator}api_key=${this.apiKey}`;
+      // Instantly API v2 uses Bearer token authentication
+      const url = `${this.baseUrl}${endpoint}`;
       const headers = {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
         ...options.headers,
       };
 
@@ -100,73 +101,94 @@ class InstantlyService {
   // ============ CAMPAIGNS ============
 
   /**
-   * Get all campaigns
+   * Get all campaigns (v2 API returns { items: Campaign[] })
    */
   async getCampaigns(): Promise<InstantlyApiResponse<InstantlyCampaign[]>> {
-    return this.request<InstantlyCampaign[]>('/campaign/list', {
+    const response = await this.request<{ items: InstantlyCampaign[] }>('/campaigns', {
       method: 'GET',
     });
+    // Transform v2 response format
+    if (response.data) {
+      return { data: response.data.items, status: response.status };
+    }
+    return { error: response.error, status: response.status };
   }
 
   /**
    * Get campaign by ID
    */
   async getCampaign(campaignId: string): Promise<InstantlyApiResponse<InstantlyCampaign>> {
-    return this.request<InstantlyCampaign>(`/campaign/${campaignId}`, {
+    return this.request<InstantlyCampaign>(`/campaigns/${campaignId}`, {
       method: 'GET',
     });
   }
 
   /**
-   * Get campaign analytics/summary
+   * Get campaign analytics/summary (v2 API)
    */
   async getCampaignAnalytics(campaignId?: string): Promise<InstantlyApiResponse<InstantlyCampaignAnalytics[]>> {
     const endpoint = campaignId 
-      ? `/analytics/campaign/summary?campaign_id=${campaignId}`
-      : '/analytics/campaign/summary';
-    return this.request<InstantlyCampaignAnalytics[]>(endpoint, {
+      ? `/campaigns/${campaignId}/analytics`
+      : '/campaigns/analytics/summary';
+    const response = await this.request<{ items?: InstantlyCampaignAnalytics[], data?: InstantlyCampaignAnalytics[] }>(endpoint, {
       method: 'GET',
     });
+    // Handle different v2 response formats
+    if (response.data) {
+      const items = response.data.items || response.data.data || (Array.isArray(response.data) ? response.data : []);
+      return { data: items as InstantlyCampaignAnalytics[], status: response.status };
+    }
+    return { error: response.error, status: response.status };
   }
 
   /**
-   * Get all campaign analytics with date range
+   * Get all campaign analytics with date range (v2 API)
    */
   async getCampaignAnalyticsWithRange(
     startDate?: string,
     endDate?: string
   ): Promise<InstantlyApiResponse<InstantlyCampaignAnalytics[]>> {
-    let endpoint = '/analytics/campaign/summary';
     const params = new URLSearchParams();
-    
     if (startDate) params.append('start_date', startDate);
     if (endDate) params.append('end_date', endDate);
     
+    let endpoint = '/campaigns/analytics/summary';
     if (params.toString()) {
       endpoint += `?${params.toString()}`;
     }
     
-    return this.request<InstantlyCampaignAnalytics[]>(endpoint, {
+    const response = await this.request<{ items?: InstantlyCampaignAnalytics[], data?: InstantlyCampaignAnalytics[] }>(endpoint, {
       method: 'GET',
     });
+    // Handle different v2 response formats
+    if (response.data) {
+      const items = response.data.items || response.data.data || (Array.isArray(response.data) ? response.data : []);
+      return { data: items as InstantlyCampaignAnalytics[], status: response.status };
+    }
+    return { error: response.error, status: response.status };
   }
 
   // ============ ACCOUNTS (INBOXES) ============
 
   /**
-   * Get all email accounts
+   * Get all email accounts (v2 API)
    */
   async getAccounts(): Promise<InstantlyApiResponse<InstantlyAccount[]>> {
-    return this.request<InstantlyAccount[]>('/account/list', {
+    const response = await this.request<{ items: InstantlyAccount[] }>('/accounts', {
       method: 'GET',
     });
+    // Transform v2 response format
+    if (response.data) {
+      return { data: response.data.items, status: response.status };
+    }
+    return { error: response.error, status: response.status };
   }
 
   /**
    * Get account by email
    */
   async getAccount(email: string): Promise<InstantlyApiResponse<InstantlyAccount>> {
-    return this.request<InstantlyAccount>(`/account?email=${encodeURIComponent(email)}`, {
+    return this.request<InstantlyAccount>(`/accounts/${encodeURIComponent(email)}`, {
       method: 'GET',
     });
   }
@@ -175,7 +197,7 @@ class InstantlyService {
    * Get account warmup status
    */
   async getAccountWarmupStatus(email: string): Promise<InstantlyApiResponse<{ status: string }>> {
-    return this.request<{ status: string }>(`/account/warmup/status?email=${encodeURIComponent(email)}`, {
+    return this.request<{ status: string }>(`/accounts/${encodeURIComponent(email)}/warmup/status`, {
       method: 'GET',
     });
   }
@@ -183,19 +205,23 @@ class InstantlyService {
   // ============ LEADS ============
 
   /**
-   * Get leads for a campaign
+   * Get leads for a campaign (v2 API)
    */
   async getLeads(campaignId: string, limit = 100, skip = 0): Promise<InstantlyApiResponse<InstantlyLead[]>> {
-    return this.request<InstantlyLead[]>(`/lead/list?campaign_id=${campaignId}&limit=${limit}&skip=${skip}`, {
+    const response = await this.request<{ items: InstantlyLead[] }>(`/campaigns/${campaignId}/leads?limit=${limit}&skip=${skip}`, {
       method: 'GET',
     });
+    if (response.data) {
+      return { data: response.data.items, status: response.status };
+    }
+    return { error: response.error, status: response.status };
   }
 
   /**
    * Get lead count for a campaign
    */
   async getLeadCount(campaignId: string): Promise<InstantlyApiResponse<{ count: number }>> {
-    return this.request<{ count: number }>(`/lead/count?campaign_id=${campaignId}`, {
+    return this.request<{ count: number }>(`/campaigns/${campaignId}/leads/count`, {
       method: 'GET',
     });
   }

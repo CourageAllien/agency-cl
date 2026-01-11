@@ -14,30 +14,51 @@ export async function GET() {
     baseUrl,
   };
 
-  // Test the campaigns endpoint
+  // Test both v1 (query param) and v2 (Bearer token) authentication
+  
+  // Test v1 style (api_key as query param)
   try {
-    const url = `${baseUrl}/campaign/list?api_key=${apiKey}`;
-    results.requestUrl = url.replace(apiKey, '[API_KEY]');
+    const v1Url = `${baseUrl}/campaign/list?api_key=${apiKey}`;
+    results.v1RequestUrl = v1Url.replace(apiKey, '[API_KEY]');
     
-    const response = await fetch(url, {
+    const v1Response = await fetch(v1Url, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    
+    results.v1Status = v1Response.status;
+    const v1Text = await v1Response.text();
+    try {
+      results.v1Body = JSON.parse(v1Text);
+    } catch {
+      results.v1Body = v1Text.substring(0, 200);
+    }
+  } catch (error) {
+    results.v1Error = error instanceof Error ? error.message : String(error);
+  }
+  
+  // Test v2 style (Bearer token)
+  try {
+    const v2Url = `https://api.instantly.ai/api/v2/campaigns`;
+    results.v2RequestUrl = v2Url;
+    
+    const v2Response = await fetch(v2Url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
       },
     });
     
-    results.responseStatus = response.status;
-    results.responseStatusText = response.statusText;
-    results.responseHeaders = Object.fromEntries(response.headers.entries());
-    
-    const text = await response.text();
+    results.v2Status = v2Response.status;
+    const v2Text = await v2Response.text();
     try {
-      results.responseBody = JSON.parse(text);
+      results.v2Body = JSON.parse(v2Text);
     } catch {
-      results.responseBody = text.substring(0, 500);
+      results.v2Body = v2Text.substring(0, 200);
     }
   } catch (error) {
-    results.fetchError = error instanceof Error ? error.message : String(error);
+    results.v2Error = error instanceof Error ? error.message : String(error);
   }
 
   return NextResponse.json(results, { status: 200 });

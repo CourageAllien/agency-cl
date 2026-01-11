@@ -19,17 +19,18 @@ export async function GET() {
     }
 
     // Transform accounts to match our expected format
+    // The service now returns normalized data with statusLabel, providerLabel, etc.
     const accounts = (accountsRes.data || []).map((account) => ({
       id: account.id,
       email: account.email,
       clientName: extractClientFromEmail(account.email),
-      status: account.status === 'active' ? 'connected' : account.status,
-      healthScore: calculateHealthScore(account),
+      status: account.statusLabel, // Already normalized to 'connected' | 'disconnected' | 'warmup'
+      healthScore: account.warmup_score || 85,
       dailySendLimit: account.daily_limit || 50,
-      sentToday: account.sent_count || 0,
-      provider: account.provider || detectProvider(account.email),
+      sentToday: 0, // Not available from API
+      provider: account.providerLabel || detectProvider(account.email),
       tags: account.tags || [],
-      warmupStatus: account.warmup_status,
+      warmupStatus: account.warmup_enabled ? 'active' : 'inactive',
     }));
 
     return NextResponse.json({
@@ -62,17 +63,10 @@ function extractClientFromEmail(email: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-function calculateHealthScore(account: { status?: string; warmup_status?: string }): number {
-  if (!account.status || account.status !== 'active') return 0;
-  if (account.warmup_status === 'warming') return 70;
-  if (account.warmup_status === 'completed') return 95;
-  return 85;
-}
-
 function detectProvider(email: string): string {
   const domain = email.split('@')[1]?.toLowerCase();
   if (!domain) return 'other';
-  if (domain.includes('gmail') || domain.includes('google')) return 'google';
-  if (domain.includes('outlook') || domain.includes('hotmail') || domain.includes('microsoft')) return 'outlook';
-  return 'other';
+  if (domain.includes('gmail') || domain.includes('google')) return 'Google';
+  if (domain.includes('outlook') || domain.includes('hotmail') || domain.includes('microsoft')) return 'Microsoft';
+  return 'SMTP';
 }

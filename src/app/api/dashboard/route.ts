@@ -5,7 +5,6 @@ import {
   transformAccounts,
   calculatePortfolioMetrics,
   generateTasksFromClassifications,
-  type InstantlyCampaign,
 } from '@/lib/services/dataTransformer';
 
 export const dynamic = 'force-dynamic';
@@ -13,43 +12,29 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    // Fetch campaigns and accounts in parallel
-    const [campaignsRes, accountsRes] = await Promise.all([
-      instantlyService.getCampaigns(),
-      instantlyService.getAccounts(),
-    ]);
+    // Fetch all data in parallel using the service's merged method
+    const fullData = await instantlyService.getFullAnalytics();
 
     // Check for API errors
-    if (campaignsRes.error) {
-      console.error('Campaigns API error:', campaignsRes.error);
-    }
-    if (accountsRes.error) {
-      console.error('Accounts API error:', accountsRes.error);
+    if (fullData.error) {
+      console.error('Instantly API error:', fullData.error);
     }
 
-    // Get raw data (or empty arrays if failed)
-    const rawCampaigns = campaignsRes.data || [];
-    const rawAccounts = accountsRes.data || [];
+    // Get the campaigns with analytics already merged
+    const campaignsWithAnalytics = fullData.campaigns;
+    const rawAccounts = fullData.accounts;
 
-    // Fetch analytics for each campaign if we have campaigns
-    let campaignsWithAnalytics: InstantlyCampaign[] = rawCampaigns;
-    
-    if (rawCampaigns.length > 0) {
-      // Try to get analytics summary
-      const analyticsRes = await instantlyService.getCampaignAnalytics();
-      
-      if (analyticsRes.data && analyticsRes.data.length > 0) {
-        // Merge analytics with campaigns
-        campaignsWithAnalytics = rawCampaigns.map((campaign) => {
-          const analytics = analyticsRes.data?.find(
-            (a) => a.campaign_id === campaign.id || a.campaign_name === campaign.name
-          );
-          return {
-            ...campaign,
-            analytics: analytics || undefined,
-          };
-        });
-      }
+    console.log(`[Dashboard] Processing ${campaignsWithAnalytics.length} campaigns with analytics`);
+    console.log(`[Dashboard] Processing ${rawAccounts.length} accounts`);
+
+    // Log sample analytics to verify data
+    if (campaignsWithAnalytics.length > 0 && campaignsWithAnalytics[0].analytics) {
+      console.log(`[Dashboard] Sample analytics:`, {
+        campaign: campaignsWithAnalytics[0].name,
+        sent: campaignsWithAnalytics[0].analytics.total_sent,
+        replied: campaignsWithAnalytics[0].analytics.total_replied,
+        opportunities: campaignsWithAnalytics[0].analytics.total_opportunities,
+      });
     }
 
     // Transform data into app format
@@ -81,12 +66,19 @@ export async function GET() {
       tasks,
       bucketDistribution,
       inboxHealth,
+      // Include raw analytics for debugging
+      rawAnalyticsSummary: {
+        totalCampaignsWithAnalytics: campaignsWithAnalytics.filter(c => c.analytics).length,
+        totalSentAcrossAll: fullData.analytics.reduce((sum, a) => sum + (a.total_sent || 0), 0),
+        totalRepliesAcrossAll: fullData.analytics.reduce((sum, a) => sum + (a.total_replied || 0), 0),
+      },
       meta: {
-        campaignCount: rawCampaigns.length,
+        campaignCount: campaignsWithAnalytics.length,
         accountCount: rawAccounts.length,
         clientCount: clients.length,
+        analyticsCount: fullData.analytics.length,
         lastUpdated: new Date().toISOString(),
-        source: campaignsRes.error ? 'fallback' : 'instantly',
+        source: fullData.error ? 'fallback' : 'instantly',
       },
     };
 

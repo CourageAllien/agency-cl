@@ -203,7 +203,8 @@ export default function InboxesPage() {
             <SelectItem value="error">Sending Error</SelectItem>
           </SelectContent>
         </Select>
-        {allTags.length > 0 && (
+        {/* Tag filter - shows when tags are available */}
+        {allTags.length > 0 ? (
           <Select value={tagFilter} onValueChange={setTagFilter}>
             <SelectTrigger className="w-[160px]">
               <Tag className="h-4 w-4 mr-2" />
@@ -218,6 +219,11 @@ export default function InboxesPage() {
               ))}
             </SelectContent>
           </Select>
+        ) : (
+          <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded-md">
+            <Tag className="h-3 w-3 inline mr-1" />
+            Tags not available from API
+          </div>
         )}
         {(statusFilter !== "all" || tagFilter !== "all") && (
           <Button

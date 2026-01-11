@@ -5,66 +5,16 @@
 
 import { BENCHMARKS } from "@/lib/engine/benchmarks";
 import { BUCKET_CONFIGS, type IssueBucket, type ClientClassification } from "@/types/analysis";
+import type { InstantlyCampaign, InstantlyAccount, InstantlyCampaignAnalytics } from "./instantly";
 
-// Types for Instantly API responses
-interface InstantlyCampaign {
-  id: string;
-  name: string;
-  status: number | string;
-  campaign_schedule?: {
-    schedules?: Array<{
-      name: string;
-      timing: { from: string; to: string };
-      days: Record<string, boolean>;
-      timezone: string;
-    }>;
-  };
-  start_date?: string | null;
-  end_date?: string | null;
-  timestamp_created?: string;
-  timestamp_updated?: string;
-  sequences?: Array<{
-    steps: Array<{
-      type: string;
-      delay: number;
-      variants: Array<{
-        subject: string;
-        body: string;
-      }>;
-    }>;
-  }>;
-  analytics?: {
-    campaign_id: string;
-    campaign_name: string;
-    total_sent: number;
-    total_opened: number;
-    total_replied: number;
-    total_bounced: number;
-    total_unsubscribed: number;
-    positive_replies?: number;
-    opportunities?: number;
-  };
-}
-
-interface InstantlyAccount {
-  id?: string;
-  email: string;
-  first_name?: string;
-  last_name?: string;
-  status?: string;
-  warmup_status?: string;
-  warmup_enabled?: boolean;
-  daily_limit?: number;
-  sent_count?: number;
-  provider?: string;
-  tags?: string[];
-}
+// Re-export types
+export type { InstantlyCampaign, InstantlyAccount, InstantlyCampaignAnalytics };
 
 // Transformed types for the app
 export interface TransformedClient {
   id: string;
   name: string;
-  campaigns: InstantlyCampaign[];
+  campaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>;
   metrics: {
     totalSent: number;
     totalOpened: number;
@@ -78,6 +28,9 @@ export interface TransformedClient {
     conversionRate: number;
     uncontactedLeads: number;
     avgInboxHealth: number;
+    leadsCount: number;
+    contactedCount: number;
+    completedCount: number;
   };
   classification: ClientClassification;
   healthScore: number;
@@ -94,6 +47,7 @@ export interface TransformedAccount {
   provider: string;
   tags: string[];
   warmupStatus?: string;
+  warmupScore: number;
   sendingError?: boolean;
   errorMessage?: string;
 }
@@ -128,8 +82,10 @@ export function extractClientName(campaignName: string): string {
 /**
  * Group campaigns by client name
  */
-export function groupCampaignsByClient(campaigns: InstantlyCampaign[]): Map<string, InstantlyCampaign[]> {
-  const clientMap = new Map<string, InstantlyCampaign[]>();
+export function groupCampaignsByClient(
+  campaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>
+): Map<string, Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>> {
+  const clientMap = new Map<string, Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>>();
 
   campaigns.forEach((campaign) => {
     const clientName = extractClientName(campaign.name);
@@ -145,13 +101,18 @@ export function groupCampaignsByClient(campaigns: InstantlyCampaign[]): Map<stri
 /**
  * Calculate metrics for a client's campaigns
  */
-export function calculateClientMetrics(campaigns: InstantlyCampaign[]): TransformedClient["metrics"] {
+export function calculateClientMetrics(
+  campaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>
+): TransformedClient["metrics"] {
   let totalSent = 0;
   let totalOpened = 0;
   let totalReplied = 0;
   let totalBounced = 0;
-  let positiveReplies = 0;
   let opportunities = 0;
+  let opportunityValue = 0;
+  let leadsCount = 0;
+  let contactedCount = 0;
+  let completedCount = 0;
 
   campaigns.forEach((campaign) => {
     if (campaign.analytics) {
@@ -159,18 +120,24 @@ export function calculateClientMetrics(campaigns: InstantlyCampaign[]): Transfor
       totalOpened += campaign.analytics.total_opened || 0;
       totalReplied += campaign.analytics.total_replied || 0;
       totalBounced += campaign.analytics.total_bounced || 0;
-      positiveReplies += campaign.analytics.positive_replies || 0;
-      opportunities += campaign.analytics.opportunities || 0;
+      opportunities += campaign.analytics.total_opportunities || 0;
+      opportunityValue += campaign.analytics.total_opportunity_value || 0;
+      leadsCount += campaign.analytics.leads_count || 0;
+      contactedCount += campaign.analytics.contacted_count || 0;
+      completedCount += campaign.analytics.completed_count || 0;
     }
   });
 
   const replyRate = totalSent > 0 ? (totalReplied / totalSent) * 100 : 0;
   const openRate = totalSent > 0 ? (totalOpened / totalSent) * 100 : 0;
   const bounceRate = totalSent > 0 ? (totalBounced / totalSent) * 100 : 0;
+  
+  // Positive replies = total replies - auto replies (estimate ~20% auto)
+  const positiveReplies = Math.floor(totalReplied * 0.8);
   const conversionRate = positiveReplies > 0 ? (opportunities / positiveReplies) * 100 : 0;
 
-  // Estimate uncontacted leads (this would normally come from the leads API)
-  const estimatedUncontacted = Math.max(0, Math.floor(totalSent * 0.3) - totalReplied);
+  // Uncontacted leads
+  const uncontactedLeads = Math.max(0, leadsCount - contactedCount);
 
   return {
     totalSent,
@@ -183,8 +150,11 @@ export function calculateClientMetrics(campaigns: InstantlyCampaign[]): Transfor
     positiveReplies,
     opportunities,
     conversionRate: Number(conversionRate.toFixed(2)),
-    uncontactedLeads: estimatedUncontacted,
+    uncontactedLeads,
     avgInboxHealth: 85, // Default, would be calculated from accounts
+    leadsCount,
+    contactedCount,
+    completedCount,
   };
 }
 
@@ -259,7 +229,7 @@ export function classifyClient(clientName: string, metrics: TransformedClient["m
   const fullMetrics = {
     ...metrics,
     totalReplies: metrics.totalReplied,
-    totalLeads: Math.round(metrics.totalSent * 1.5), // Estimate
+    totalLeads: metrics.leadsCount,
     activeCampaigns: 1,
     activeInboxes: 2,
     disconnectedInboxes: 0,
@@ -314,7 +284,9 @@ export function calculateHealthScore(metrics: TransformedClient["metrics"]): num
 /**
  * Transform Instantly campaigns into app's client format
  */
-export function transformCampaignsToClients(campaigns: InstantlyCampaign[]): TransformedClient[] {
+export function transformCampaignsToClients(
+  campaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>
+): TransformedClient[] {
   const clientMap = groupCampaignsByClient(campaigns);
   const clients: TransformedClient[] = [];
 
@@ -357,45 +329,25 @@ export function transformAccounts(accounts: InstantlyAccount[], clients: Transfo
       }
     }
 
-    // Determine status
-    let status: TransformedAccount["status"] = "connected";
-    if (account.status === "disconnected" || account.status === "error") {
-      status = "disconnected";
-    } else if (account.warmup_enabled || account.warmup_status === "active") {
-      status = "warmup";
-    }
-
-    // Calculate health score based on warmup status and daily limits
-    let healthScore = 85;
-    if (status === "disconnected") healthScore = 0;
-    else if (status === "warmup") healthScore = 60;
-    else if (account.sent_count && account.daily_limit) {
-      const utilizationRate = account.sent_count / account.daily_limit;
-      healthScore = utilizationRate > 0.9 ? 70 : utilizationRate > 0.5 ? 85 : 95;
-    }
-
-    // Detect provider from email
-    let provider = account.provider || "unknown";
-    if (!provider || provider === "unknown") {
-      const email = account.email.toLowerCase();
-      if (email.includes("gmail") || email.includes("googlemail")) provider = "Google";
-      else if (email.includes("outlook") || email.includes("hotmail") || email.includes("microsoft")) provider = "Microsoft";
-      else provider = "Other";
-    }
+    // Calculate health score based on warmup score
+    let healthScore = account.warmup_score || 85;
+    if (account.statusLabel === "disconnected") healthScore = 0;
+    else if (account.statusLabel === "warmup") healthScore = Math.max(60, account.warmup_score || 60);
 
     return {
       id: account.id || account.email,
       email: account.email,
       clientName,
-      status,
+      status: account.statusLabel,
       healthScore,
       dailySendLimit: account.daily_limit || 50,
-      sentToday: account.sent_count || 0,
-      provider,
+      sentToday: 0, // Not available from accounts endpoint
+      provider: account.providerLabel || "Unknown",
       tags: account.tags || [],
-      warmupStatus: account.warmup_status,
-      sendingError: status === "disconnected",
-      errorMessage: status === "disconnected" ? "Account disconnected" : undefined,
+      warmupStatus: account.warmup_enabled ? "active" : "inactive",
+      warmupScore: account.warmup_score || 0,
+      sendingError: account.statusLabel === "disconnected",
+      errorMessage: account.statusLabel === "disconnected" ? "Account disconnected" : undefined,
     };
   });
 }
@@ -542,5 +494,3 @@ export function generateTasksFromClassifications(clients: TransformedClient[]) {
 
   return { daily, weekly };
 }
-
-export type { InstantlyCampaign, InstantlyAccount };

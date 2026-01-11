@@ -15,40 +15,109 @@ interface InstantlyApiResponse<T> {
   status: number;
 }
 
+// Raw campaign from Instantly API v2
+interface InstantlyRawCampaign {
+  id: string;
+  name: string;
+  status: number; // 1=draft, 2=active, 3=paused, 4=completed
+  campaign_schedule?: {
+    schedules?: Array<{
+      name: string;
+      timing: { from: string; to: string };
+      days: Record<string, boolean>;
+      timezone: string;
+    }>;
+    start_date?: string | null;
+    end_date?: string | null;
+  };
+  timestamp_created?: string;
+  timestamp_updated?: string;
+  sequences?: unknown[];
+  daily_limit?: number;
+  email_tag_list?: string[];
+}
+
+// Raw analytics from Instantly API v2 - CORRECT FIELD NAMES
+interface InstantlyRawAnalytics {
+  campaign_id: string;
+  campaign_name: string;
+  campaign_status: number;
+  leads_count: number;
+  contacted_count: number;
+  emails_sent_count: number;
+  new_leads_contacted_count: number;
+  open_count: number;
+  reply_count: number;
+  reply_count_unique: number;
+  reply_count_automatic: number;
+  link_click_count: number;
+  bounced_count: number;
+  unsubscribed_count: number;
+  completed_count: number;
+  total_opportunities: number;
+  total_opportunity_value: number;
+}
+
+// Raw account from Instantly API v2 - CORRECT FIELD NAMES
+interface InstantlyRawAccount {
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  organization?: string;
+  status: number; // 1=active, 0=disconnected
+  warmup_status: number; // 1=enabled, 0=disabled
+  provider_code: number;
+  daily_limit: number;
+  setup_pending: boolean;
+  timestamp_created?: string;
+  timestamp_updated?: string;
+  stat_warmup_score?: number;
+  sending_gap?: number;
+}
+
+// Normalized types for the app (with correct mappings)
 interface InstantlyCampaign {
   id: string;
   name: string;
-  status: string | number;
-  created_at?: string;
-  updated_at?: string;
+  status: number;
+  statusLabel: string;
   timestamp_created?: string;
   timestamp_updated?: string;
+  dailyLimit?: number;
+  tags?: string[];
+  analytics?: InstantlyCampaignAnalytics;
 }
 
 interface InstantlyCampaignAnalytics {
   campaign_id: string;
   campaign_name: string;
-  total_sent: number;
-  total_opened: number;
-  total_replied: number;
-  total_bounced: number;
+  leads_count: number;
+  contacted_count: number;
+  total_sent: number;        // mapped from emails_sent_count
+  total_opened: number;      // mapped from open_count
+  total_replied: number;     // mapped from reply_count
+  total_bounced: number;     // mapped from bounced_count
   total_unsubscribed: number;
-  positive_replies?: number;
-  opportunities?: number;
+  completed_count: number;
+  total_opportunities: number;
+  total_opportunity_value: number;
+  reply_count_unique: number;
 }
 
 interface InstantlyAccount {
-  id?: string;
+  id: string;
   email: string;
   first_name?: string;
   last_name?: string;
-  status?: string;
-  warmup_status?: string;
-  warmup_enabled?: boolean;
-  daily_limit?: number;
-  sent_count?: number;
-  provider?: string;
-  tags?: string[];
+  status: number;
+  statusLabel: 'connected' | 'disconnected' | 'warmup';
+  warmup_status: number;
+  warmup_enabled: boolean;
+  daily_limit: number;
+  provider_code: number;
+  providerLabel: string;
+  warmup_score: number;
+  tags: string[]; // Will be populated separately
 }
 
 interface InstantlyLead {
@@ -60,6 +129,21 @@ interface InstantlyLead {
   status: string;
   campaign_id: string;
 }
+
+// Status mappings
+const CAMPAIGN_STATUS_MAP: Record<number, string> = {
+  1: 'draft',
+  2: 'active',
+  3: 'paused',
+  4: 'completed',
+};
+
+const PROVIDER_CODE_MAP: Record<number, string> = {
+  1: 'Google',
+  2: 'Microsoft',
+  3: 'SMTP',
+  4: 'Other',
+};
 
 class InstantlyService {
   private apiKey: string;
@@ -139,60 +223,131 @@ class InstantlyService {
   // ============ CAMPAIGNS ============
 
   /**
-   * Get all campaigns (v2 API)
+   * Get all campaigns (v2 API) with normalized data
    */
   async getCampaigns(): Promise<InstantlyApiResponse<InstantlyCampaign[]>> {
     const response = await this.request<unknown>('/campaigns', { method: 'GET' });
     if (response.error) {
       return { error: response.error, status: response.status };
     }
-    const campaigns = this.extractArray<InstantlyCampaign>(response.data);
-    console.log(`[Instantly API v2] Found ${campaigns.length} campaigns`);
+    
+    const rawCampaigns = this.extractArray<InstantlyRawCampaign>(response.data);
+    console.log(`[Instantly API v2] Found ${rawCampaigns.length} campaigns`);
+    
+    // Normalize campaigns
+    const campaigns: InstantlyCampaign[] = rawCampaigns.map(raw => ({
+      id: raw.id,
+      name: raw.name,
+      status: raw.status,
+      statusLabel: CAMPAIGN_STATUS_MAP[raw.status] || 'unknown',
+      timestamp_created: raw.timestamp_created,
+      timestamp_updated: raw.timestamp_updated,
+      dailyLimit: raw.daily_limit,
+      tags: raw.email_tag_list || [],
+    }));
+    
     return { data: campaigns, status: response.status };
   }
 
   /**
-   * Get campaign by ID (v2 API)
+   * Get campaign analytics (v2 API) with normalized data
    */
-  async getCampaign(campaignId: string): Promise<InstantlyApiResponse<InstantlyCampaign>> {
-    return this.request<InstantlyCampaign>(`/campaigns/${campaignId}`, { method: 'GET' });
-  }
-
-  /**
-   * Get campaign analytics (v2 API)
-   */
-  async getCampaignAnalytics(campaignId?: string): Promise<InstantlyApiResponse<InstantlyCampaignAnalytics[]>> {
-    const endpoint = campaignId 
-      ? `/campaigns/${campaignId}/analytics`
-      : '/campaigns/analytics';
-    const response = await this.request<unknown>(endpoint, { method: 'GET' });
+  async getCampaignAnalytics(): Promise<InstantlyApiResponse<InstantlyCampaignAnalytics[]>> {
+    const response = await this.request<unknown>('/campaigns/analytics', { method: 'GET' });
     if (response.error) {
       return { error: response.error, status: response.status };
     }
-    const analytics = this.extractArray<InstantlyCampaignAnalytics>(response.data);
+    
+    const rawAnalytics = this.extractArray<InstantlyRawAnalytics>(response.data);
+    console.log(`[Instantly API v2] Found ${rawAnalytics.length} analytics entries`);
+    
+    // Normalize analytics - MAP CORRECT FIELD NAMES
+    const analytics: InstantlyCampaignAnalytics[] = rawAnalytics.map(raw => ({
+      campaign_id: raw.campaign_id,
+      campaign_name: raw.campaign_name,
+      leads_count: raw.leads_count || 0,
+      contacted_count: raw.contacted_count || 0,
+      total_sent: raw.emails_sent_count || 0,           // MAPPED!
+      total_opened: raw.open_count || 0,                // MAPPED!
+      total_replied: raw.reply_count || 0,              // MAPPED!
+      total_bounced: raw.bounced_count || 0,            // MAPPED!
+      total_unsubscribed: raw.unsubscribed_count || 0,
+      completed_count: raw.completed_count || 0,
+      total_opportunities: raw.total_opportunities || 0,
+      total_opportunity_value: raw.total_opportunity_value || 0,
+      reply_count_unique: raw.reply_count_unique || 0,
+    }));
+    
     return { data: analytics, status: response.status };
   }
 
   // ============ ACCOUNTS (INBOXES) ============
 
   /**
-   * Get all email accounts (v2 API)
+   * Get all email accounts (v2 API) with normalized data
    */
   async getAccounts(): Promise<InstantlyApiResponse<InstantlyAccount[]>> {
     const response = await this.request<unknown>('/accounts', { method: 'GET' });
     if (response.error) {
       return { error: response.error, status: response.status };
     }
-    const accounts = this.extractArray<InstantlyAccount>(response.data);
-    console.log(`[Instantly API v2] Found ${accounts.length} accounts`);
+    
+    const rawAccounts = this.extractArray<InstantlyRawAccount>(response.data);
+    console.log(`[Instantly API v2] Found ${rawAccounts.length} accounts`);
+    
+    // Normalize accounts - MAP CORRECT FIELD NAMES
+    const accounts: InstantlyAccount[] = rawAccounts.map(raw => {
+      // Determine status label
+      let statusLabel: 'connected' | 'disconnected' | 'warmup' = 'connected';
+      if (raw.status === 0 || raw.setup_pending) {
+        statusLabel = 'disconnected';
+      } else if (raw.warmup_status === 1) {
+        statusLabel = 'warmup';
+      }
+      
+      return {
+        id: raw.email, // Use email as ID since no separate ID field
+        email: raw.email,
+        first_name: raw.first_name,
+        last_name: raw.last_name,
+        status: raw.status,
+        statusLabel,
+        warmup_status: raw.warmup_status,
+        warmup_enabled: raw.warmup_status === 1,
+        daily_limit: raw.daily_limit || 50,
+        provider_code: raw.provider_code,
+        providerLabel: PROVIDER_CODE_MAP[raw.provider_code] || 'Unknown',
+        warmup_score: raw.stat_warmup_score || 0,
+        tags: [], // Tags need separate API call
+      };
+    });
+    
     return { data: accounts, status: response.status };
   }
 
   /**
-   * Get account by email (v2 API)
+   * Get account tags - Instantly may have a separate endpoint for this
+   * This is a placeholder - we'll try to discover the correct endpoint
    */
-  async getAccount(email: string): Promise<InstantlyApiResponse<InstantlyAccount>> {
-    return this.request<InstantlyAccount>(`/accounts/${encodeURIComponent(email)}`, { method: 'GET' });
+  async getAccountTags(): Promise<InstantlyApiResponse<{ email: string; tags: string[] }[]>> {
+    // Try different possible endpoints
+    const possibleEndpoints = [
+      '/accounts/tags',
+      '/email-accounts/tags', 
+      '/tags',
+    ];
+
+    for (const endpoint of possibleEndpoints) {
+      const response = await this.request<unknown>(endpoint, { method: 'GET' });
+      if (!response.error && response.data) {
+        console.log(`[Instantly API v2] Found tags at ${endpoint}`);
+        const tags = this.extractArray<{ email: string; tags: string[] }>(response.data);
+        return { data: tags, status: response.status };
+      }
+    }
+
+    console.log('[Instantly API v2] No tags endpoint found');
+    return { data: [], status: 200 };
   }
 
   // ============ LEADS ============
@@ -235,7 +390,7 @@ class InstantlyService {
   }
 
   /**
-   * Get full analytics data
+   * Get full analytics data with campaigns merged
    */
   async getFullAnalytics(): Promise<{
     campaigns: InstantlyCampaign[];
@@ -249,8 +404,16 @@ class InstantlyService {
       this.getAccounts(),
     ]);
 
+    // Merge analytics into campaigns
+    const campaigns = (campaignsRes.data || []).map(campaign => {
+      const analytics = (analyticsRes.data || []).find(
+        a => a.campaign_id === campaign.id
+      );
+      return { ...campaign, analytics };
+    });
+
     return {
-      campaigns: campaignsRes.data || [],
+      campaigns,
       analytics: analyticsRes.data || [],
       accounts: accountsRes.data || [],
       error: campaignsRes.error || analyticsRes.error || accountsRes.error,

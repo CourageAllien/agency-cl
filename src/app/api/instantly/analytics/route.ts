@@ -12,8 +12,7 @@ function getMockAnalyticsResponse() {
     total_replied: c.replied,
     total_bounced: c.bounced,
     total_unsubscribed: 0,
-    positive_replies: c.positiveReplies,
-    opportunities: c.opportunities,
+    total_opportunities: c.opportunities,
   }));
 
   const totals = analytics.reduce(
@@ -23,8 +22,7 @@ function getMockAnalyticsResponse() {
       totalReplied: acc.totalReplied + campaign.total_replied,
       totalBounced: acc.totalBounced + campaign.total_bounced,
       totalUnsubscribed: acc.totalUnsubscribed + campaign.total_unsubscribed,
-      positiveReplies: acc.positiveReplies + (campaign.positive_replies || 0),
-      opportunities: acc.opportunities + (campaign.opportunities || 0),
+      opportunities: acc.opportunities + (campaign.total_opportunities || 0),
     }),
     {
       totalSent: 0,
@@ -32,7 +30,6 @@ function getMockAnalyticsResponse() {
       totalReplied: 0,
       totalBounced: 0,
       totalUnsubscribed: 0,
-      positiveReplies: 0,
       opportunities: 0,
     }
   );
@@ -40,9 +37,6 @@ function getMockAnalyticsResponse() {
   const openRate = totals.totalSent > 0 ? (totals.totalOpened / totals.totalSent) * 100 : 0;
   const replyRate = totals.totalSent > 0 ? (totals.totalReplied / totals.totalSent) * 100 : 0;
   const bounceRate = totals.totalSent > 0 ? (totals.totalBounced / totals.totalSent) * 100 : 0;
-  const conversionRate = totals.positiveReplies > 0 
-    ? (totals.opportunities / totals.positiveReplies) * 100 
-    : 0;
 
   return {
     campaigns: analytics,
@@ -51,7 +45,6 @@ function getMockAnalyticsResponse() {
       openRate: Number(openRate.toFixed(2)),
       replyRate: Number(replyRate.toFixed(2)),
       bounceRate: Number(bounceRate.toFixed(2)),
-      conversionRate: Number(conversionRate.toFixed(2)),
     },
     campaignCount: analytics.length,
     source: 'mock',
@@ -70,16 +63,15 @@ export async function GET() {
 
     const analytics = analyticsRes.data || [];
 
-    // Aggregate totals
+    // Aggregate totals - using the normalized field names from the service
     const totals = analytics.reduce(
       (acc, campaign) => ({
-        totalSent: acc.totalSent + campaign.total_sent,
-        totalOpened: acc.totalOpened + campaign.total_opened,
-        totalReplied: acc.totalReplied + campaign.total_replied,
-        totalBounced: acc.totalBounced + campaign.total_bounced,
-        totalUnsubscribed: acc.totalUnsubscribed + campaign.total_unsubscribed,
-        positiveReplies: acc.positiveReplies + (campaign.positive_replies || 0),
-        opportunities: acc.opportunities + (campaign.opportunities || 0),
+        totalSent: acc.totalSent + (campaign.total_sent || 0),
+        totalOpened: acc.totalOpened + (campaign.total_opened || 0),
+        totalReplied: acc.totalReplied + (campaign.total_replied || 0),
+        totalBounced: acc.totalBounced + (campaign.total_bounced || 0),
+        totalUnsubscribed: acc.totalUnsubscribed + (campaign.total_unsubscribed || 0),
+        opportunities: acc.opportunities + (campaign.total_opportunities || 0),
       }),
       {
         totalSent: 0,
@@ -87,7 +79,6 @@ export async function GET() {
         totalReplied: 0,
         totalBounced: 0,
         totalUnsubscribed: 0,
-        positiveReplies: 0,
         opportunities: 0,
       }
     );
@@ -96,8 +87,8 @@ export async function GET() {
     const openRate = totals.totalSent > 0 ? (totals.totalOpened / totals.totalSent) * 100 : 0;
     const replyRate = totals.totalSent > 0 ? (totals.totalReplied / totals.totalSent) * 100 : 0;
     const bounceRate = totals.totalSent > 0 ? (totals.totalBounced / totals.totalSent) * 100 : 0;
-    const conversionRate = totals.positiveReplies > 0 
-      ? (totals.opportunities / totals.positiveReplies) * 100 
+    const conversionRate = totals.totalReplied > 0 
+      ? (totals.opportunities / totals.totalReplied) * 100 
       : 0;
 
     return NextResponse.json({

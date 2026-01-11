@@ -56,7 +56,7 @@ export async function GET() {
           acc[status] = (acc[status] || 0) + 1;
           return acc;
         }, {}),
-        allTags: [...new Set(accounts.flatMap((a: any) => a.tags || []))],
+        allTags: Array.from(new Set(accounts.flatMap((a: any) => a.tags || []))),
         warmupEnabled: accounts.filter((a: any) => a.warmup_enabled).length,
       },
       analytics: {

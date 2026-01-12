@@ -63,8 +63,10 @@ export async function GET() {
       lowHealth: transformedAccounts.filter(a => a.healthScore < 70).length,
     };
 
-    // All unique tags from accounts
-    const allTags = Array.from(new Set(transformedAccounts.flatMap(a => a.tags))).sort();
+    // All unique tags - get from both the tags API and accounts
+    const tagsFromApi = tags.map(t => t.name).filter(Boolean);
+    const tagsFromAccounts = transformedAccounts.flatMap(a => a.tags);
+    const allTags = Array.from(new Set([...tagsFromApi, ...tagsFromAccounts])).sort();
 
     // Build response
     const response = {

@@ -959,8 +959,8 @@ class InstantlyService {
   }
 
   /**
-   * Get complete analytics data with ALL data fetched (no limits)
-   * Focuses on ACTIVE campaigns for classification
+   * Get analytics data - OPTIMIZED for speed
+   * Fetches only first page of each (100 items max) to avoid timeouts
    */
   async getFullAnalytics(): Promise<{
     campaigns: InstantlyCampaign[];
@@ -971,40 +971,35 @@ class InstantlyService {
     tagMappings: InstantlyTagMapping[];
     error?: string;
   }> {
-    console.log('[Instantly API v2] Fetching ALL data (no limits)...');
+    console.log('[Instantly API v2] Fetching data (FAST mode)...');
 
-    // Fetch all data in parallel using pagination
+    // Fetch all in parallel - first page only (100 items each)
     const [
-      campaignsResult,
-      accountsResult,
-      tagsResult,
-      tagMappingsResult,
+      campaignsRes,
+      accountsRes,
+      tagsRes,
+      tagMappingsRes,
+      analyticsRes,
+      analyticsOverviewRes,
     ] = await Promise.all([
-      this.getAllCampaigns(),
-      this.getAllAccounts(),
-      this.getAllCustomTags(),
-      this.getAllTagMappings(),
+      this.getCampaigns({ limit: 100 }),
+      this.getAccounts({ limit: 100 }),
+      this.getCustomTags(),
+      this.getCustomTagMappings({}),
+      this.getCampaignAnalytics({ exclude_total_leads_count: false }),
+      this.getCampaignAnalyticsOverview({ expand_crm_events: false }),
     ]);
 
-    const allCampaigns = campaignsResult.data || [];
-    const accounts = accountsResult.data || [];
-    const tags = tagsResult.data || [];
-    const tagMappings = tagMappingsResult.data || [];
+    const allCampaigns = campaignsRes.data || [];
+    const accounts = accountsRes.data || [];
+    const tags = tagsRes.data || [];
+    const tagMappings = tagMappingsRes.data || [];
 
-    console.log(`[Instantly API v2] Total campaigns: ${allCampaigns.length}`);
-    console.log(`[Instantly API v2] Total accounts: ${accounts.length}`);
-    console.log(`[Instantly API v2] Total tags: ${tags.length}`);
-    console.log(`[Instantly API v2] Total tag mappings: ${tagMappings.length}`);
+    console.log(`[Instantly API v2] Campaigns: ${allCampaigns.length}, Accounts: ${accounts.length}, Tags: ${tags.length}`);
 
     // Filter to ACTIVE campaigns only for classification
     const activeCampaigns = allCampaigns.filter(c => c.isActive);
     console.log(`[Instantly API v2] ACTIVE campaigns: ${activeCampaigns.length}`);
-
-    // Now fetch analytics for all campaigns
-    const [analyticsRes, analyticsOverviewRes] = await Promise.all([
-      this.getCampaignAnalytics({ exclude_total_leads_count: false }),
-      this.getCampaignAnalyticsOverview({ expand_crm_events: false }),
-    ]);
 
     const rawAnalytics = analyticsRes.data || [];
     const rawOverview = analyticsOverviewRes.data || [];
@@ -1098,10 +1093,10 @@ class InstantlyService {
     console.log(`[Instantly API v2] Skipping warmup analytics for ${accounts.length} accounts (using warmup_score instead)`);
 
     const errors = [
-      campaignsResult.error,
-      accountsResult.error,
-      tagsResult.error,
-      tagMappingsResult.error,
+      campaignsRes.error,
+      accountsRes.error,
+      tagsRes.error,
+      tagMappingsRes.error,
       analyticsRes.error,
     ].filter(Boolean).join('; ');
 

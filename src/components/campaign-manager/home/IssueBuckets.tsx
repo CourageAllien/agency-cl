@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { BUCKET_CONFIGS, type IssueBucket } from "@/types/analysis";
-import type { TransformedClient } from "@/lib/services/dataTransformer";
+import type { TransformedClient } from "@/hooks/useDashboardData";
 import {
   AlertTriangle,
   TrendingDown,

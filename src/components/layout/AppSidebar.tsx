@@ -17,6 +17,7 @@ import {
   PenTool,
   Shield,
   ExternalLink,
+  Sparkles,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -35,9 +36,19 @@ interface NavSection {
   href: string;
   items: NavItem[];
   disabled?: boolean;
+  isTopLevel?: boolean; // For standalone pages like Terminal
 }
 
 const navigation: NavSection[] = [
+  // Terminal is now a top-level standalone page
+  {
+    title: "Command Terminal",
+    icon: Terminal,
+    href: "/terminal",
+    isTopLevel: true,
+    items: [],
+  },
+  // Campaign Manager section
   {
     title: "Campaign Manager",
     icon: Target,
@@ -48,7 +59,6 @@ const navigation: NavSection[] = [
       { title: "Analytics", href: "/campaign-manager/analytics", icon: BarChart3 },
       { title: "Inboxes", href: "/campaign-manager/inboxes", icon: Mail },
       { title: "Tasks", href: "/campaign-manager/tasks", icon: CheckSquare },
-      { title: "Terminal", href: "/campaign-manager/terminal", icon: Terminal },
       { title: "Settings", href: "/campaign-manager/settings", icon: Settings },
     ],
   },
@@ -119,6 +129,28 @@ export function AppSidebar() {
             const isActive = pathname.startsWith(section.href);
             const SectionIcon = section.icon;
 
+            // Top-level standalone pages (like Terminal)
+            if (section.isTopLevel) {
+              return (
+                <div key={section.href}>
+                  <Link
+                    href={section.href}
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                      isActive
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <SectionIcon className="h-5 w-5" />
+                    <span>{section.title}</span>
+                    <Sparkles className="ml-auto h-3.5 w-3.5 text-primary" />
+                  </Link>
+                </div>
+              );
+            }
+
+            // Regular sections with sub-items
             return (
               <div key={section.href} className="space-y-1">
                 {/* Section Header */}

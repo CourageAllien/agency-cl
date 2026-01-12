@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { TransformedClient } from "@/lib/services/dataTransformer";
+import type { TransformedClient } from "@/hooks/useDashboardData";
 import { TrendingUp, TrendingDown, Minus, Activity } from "lucide-react";
 import {
   LineChart,

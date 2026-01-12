@@ -1092,34 +1092,10 @@ class InstantlyService {
       };
     });
 
-    // Fetch warmup analytics for health scores (optional)
-    if (accounts.length > 0) {
-      try {
-        // Batch in groups of 100
-        const batches = [];
-        for (let i = 0; i < accounts.length; i += 100) {
-          batches.push(accounts.slice(i, i + 100).map(a => a.email));
-        }
-
-        for (const emailBatch of batches) {
-          const warmupRes = await this.getWarmupAnalytics(emailBatch);
-          
-          if (warmupRes.data?.aggregate_data) {
-            enrichedAccounts.forEach(account => {
-              const warmup = warmupRes.data?.aggregate_data[account.email];
-              if (warmup) {
-                account.health_score = warmup.health_score || account.warmup_score;
-                account.health_score_label = warmup.health_score_label || `${account.warmup_score}%`;
-                account.landed_inbox = warmup.landed_inbox || 0;
-                account.landed_spam = warmup.landed_spam || 0;
-              }
-            });
-          }
-        }
-      } catch (warmupError) {
-        console.warn('[Instantly API v2] Warmup analytics failed, using defaults:', warmupError);
-      }
-    }
+    // Note: Warmup analytics for 5000+ accounts would cause timeout
+    // Health scores are already available from stat_warmup_score in account data
+    // Only fetch warmup analytics if explicitly needed and accounts are limited
+    console.log(`[Instantly API v2] Skipping warmup analytics for ${accounts.length} accounts (using warmup_score instead)`);
 
     const errors = [
       campaignsResult.error,

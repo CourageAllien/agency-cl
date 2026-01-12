@@ -29,6 +29,32 @@ import {
   CategorizedInboxes,
 } from './types';
 
+// ============ DATE RANGE HELPERS ============
+
+function getDateRange(period: 'today' | 'week' | 'month' | 'all'): { start_date: string; end_date: string } | undefined {
+  const now = new Date();
+  const endDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+  
+  switch (period) {
+    case 'today': {
+      return { start_date: endDate, end_date: endDate };
+    }
+    case 'week': {
+      const weekAgo = new Date(now);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return { start_date: weekAgo.toISOString().split('T')[0], end_date: endDate };
+    }
+    case 'month': {
+      const monthAgo = new Date(now);
+      monthAgo.setDate(monthAgo.getDate() - 30);
+      return { start_date: monthAgo.toISOString().split('T')[0], end_date: endDate };
+    }
+    case 'all':
+    default:
+      return undefined; // No date range = all time
+  }
+}
+
 // Parse user input to determine command
 export function parseCommand(input: string): CommandType {
   const normalized = input.toLowerCase().trim();
@@ -623,8 +649,11 @@ async function handleDailyCommand(forceRefresh: boolean): Promise<TerminalRespon
     }
   }
   
-  // Fetch data from Instantly API
-  const data = await instantlyService.getFullAnalytics();
+  // Fetch data for TODAY only
+  const todayDateRange = getDateRange('today');
+  console.log(`[Terminal] Fetching daily data: ${todayDateRange?.start_date}`);
+  
+  const data = await instantlyService.getFullAnalytics(todayDateRange);
   
   // Filter for active campaigns only
   const activeCampaigns = data.activeCampaigns || [];
@@ -723,7 +752,11 @@ async function handleWeeklyCommand(forceRefresh: boolean): Promise<TerminalRespo
     }
   }
   
-  const data = await instantlyService.getFullAnalytics();
+  // Fetch data for LAST 7 DAYS only
+  const weekDateRange = getDateRange('week');
+  console.log(`[Terminal] Fetching weekly data: ${weekDateRange?.start_date} to ${weekDateRange?.end_date}`);
+  
+  const data = await instantlyService.getFullAnalytics(weekDateRange);
   const activeCampaigns = data.activeCampaigns || [];
   
   // Calculate 7-day metrics
@@ -1136,7 +1169,11 @@ async function handleBenchmarksCommand(forceRefresh: boolean): Promise<TerminalR
     }
   }
   
-  const data = await instantlyService.getFullAnalytics();
+  // Fetch data for LAST 7 DAYS (weekly benchmark check)
+  const weekDateRange = getDateRange('week');
+  console.log(`[Terminal] Fetching benchmarks data: ${weekDateRange?.start_date} to ${weekDateRange?.end_date}`);
+  
+  const data = await instantlyService.getFullAnalytics(weekDateRange);
   const activeCampaigns = data.activeCampaigns || [];
   
   const belowBenchmark: BenchmarkResult[] = [];
@@ -1230,7 +1267,11 @@ async function handleConversionCommand(forceRefresh: boolean): Promise<TerminalR
     }
   }
   
-  const data = await instantlyService.getFullAnalytics();
+  // Fetch data for LAST 7 DAYS
+  const weekDateRange = getDateRange('week');
+  console.log(`[Terminal] Fetching conversion data: ${weekDateRange?.start_date} to ${weekDateRange?.end_date}`);
+  
+  const data = await instantlyService.getFullAnalytics(weekDateRange);
   const activeCampaigns = data.activeCampaigns || [];
   
   const zeroConversions: ConversionResult[] = [];
@@ -1879,7 +1920,11 @@ async function handleReplyTrendsCommand(forceRefresh: boolean): Promise<Terminal
     }
   }
   
-  const data = await instantlyService.getFullAnalytics();
+  // Fetch data for LAST 7 DAYS
+  const weekDateRange = getDateRange('week');
+  console.log(`[Terminal] Fetching reply trends: ${weekDateRange?.start_date} to ${weekDateRange?.end_date}`);
+  
+  const data = await instantlyService.getFullAnalytics(weekDateRange);
   const activeCampaigns = data.activeCampaigns || [];
   
   // Simulated trend analysis based on current data

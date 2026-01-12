@@ -998,17 +998,22 @@ class InstantlyService {
   /**
    * Get analytics data - OPTIMIZED for speed
    * Fetches ALL campaigns but only first page of accounts to prevent timeouts
+   * @param dateRange - Optional date range for analytics (defaults to all time)
    */
-  async getFullAnalytics(): Promise<{
+  async getFullAnalytics(dateRange?: { start_date: string; end_date: string }): Promise<{
     campaigns: InstantlyCampaign[];
     activeCampaigns: InstantlyCampaign[];
     analytics: InstantlyCampaignAnalytics[];
     accounts: InstantlyAccount[];
     tags: InstantlyCustomTag[];
     tagMappings: InstantlyTagMapping[];
+    dateRange?: { start_date: string; end_date: string };
     error?: string;
   }> {
-    console.log('[Instantly API v2] Fetching data...');
+    const dateInfo = dateRange 
+      ? `${dateRange.start_date} to ${dateRange.end_date}` 
+      : 'all time';
+    console.log(`[Instantly API v2] Fetching data for: ${dateInfo}`);
 
     // Fetch ALL campaigns (usually <100) but only first page of accounts
     // Campaigns are the priority - accounts pagination is too slow
@@ -1024,8 +1029,16 @@ class InstantlyService {
       this.getAccounts({ limit: 100 }),  // First 100 accounts only for speed
       this.getCustomTags(),
       this.getCustomTagMappings({}),
-      this.getCampaignAnalytics({ exclude_total_leads_count: false }),
-      this.getCampaignAnalyticsOverview({ expand_crm_events: false }),
+      this.getCampaignAnalytics({ 
+        exclude_total_leads_count: false,
+        start_date: dateRange?.start_date,
+        end_date: dateRange?.end_date,
+      }),
+      this.getCampaignAnalyticsOverview({ 
+        expand_crm_events: false,
+        start_date: dateRange?.start_date,
+        end_date: dateRange?.end_date,
+      }),
     ]);
 
     const allCampaigns = allCampaignsRes.data || [];
@@ -1166,6 +1179,7 @@ class InstantlyService {
       accounts: enrichedAccounts,
       tags,
       tagMappings,
+      dateRange,
       error: errors || undefined,
     };
   }

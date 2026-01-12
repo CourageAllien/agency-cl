@@ -1553,16 +1553,16 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
   
   let accounts: InstantlyAccount[] = [];
   try {
-    console.log('[Terminal] Fetching inbox/account data from Instantly API...');
-    // Only fetch accounts - we don't need campaigns for inbox health
-    const accountsRes = await instantlyService.getAccounts({ limit: 100 });
+    console.log('[Terminal] Fetching ALL inbox/account data from Instantly API...');
+    // Fetch ALL accounts using pagination - for full inbox health check
+    const accountsData = await instantlyService.getFullAccountsData();
     
-    if (accountsRes.error) {
-      throw new Error(accountsRes.error);
+    if (accountsData.error) {
+      throw new Error(accountsData.error);
     }
     
-    accounts = accountsRes.data || [];
-    console.log(`[Terminal] Received ${accounts.length} accounts`);
+    accounts = accountsData.accounts || [];
+    console.log(`[Terminal] Received ${accounts.length} total accounts`);
   } catch (error) {
     console.error('[Terminal] Error fetching inbox data:', error);
     return {

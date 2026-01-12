@@ -296,263 +296,232 @@ export interface TerminalItem {
   }>;
 }
 
-// Command aliases mapping - comprehensive natural language support
+// Command aliases mapping - NATURAL LANGUAGE QUESTIONS
 export const COMMAND_ALIASES: Record<string, CommandType> = {
-  // ============ CAMPAIGN LIST ============
+  // ============ CAMPAIGN QUESTIONS ============
+  // Primary question format
+  'what campaigns are active?': 'campaigns',
+  'what campaigns are running?': 'campaigns',
+  'how are my campaigns doing?': 'campaigns',
+  'show me all campaigns': 'campaigns',
+  'what is the status of all campaigns?': 'campaigns',
+  // Short aliases
   'list': 'campaigns',
   'campaigns': 'campaigns',
-  'list all active campaigns': 'campaigns',
-  'show all campaigns': 'campaigns',
-  'campaign list': 'campaigns',
   'active campaigns': 'campaigns',
   'all campaigns': 'campaigns',
-  'list campaigns': 'campaigns',
-  'running campaigns': 'campaigns',
-  'what campaigns are running': 'campaigns',
-  'show campaigns': 'campaigns',
-  'campaign analytics': 'campaigns',
-  'campaign performance': 'campaigns',
   'stats': 'campaigns',
   'performance': 'campaigns',
   
-  // ============ DAILY COMMANDS ============
-  'd': 'daily',
+  // ============ DAILY QUESTIONS ============
+  // Primary question format
+  'what happened today?': 'daily',
+  'how did we do today?': 'daily',
+  'what are today\'s numbers?': 'daily',
+  'show me today\'s metrics': 'daily',
+  'what is today\'s performance?': 'daily',
+  // Short aliases
   'daily': 'daily',
-  'show daily tasks': 'daily',
-  'what do i need to do today': 'daily',
   'today': 'daily',
-  'daily stats': 'daily',
-  'today\'s metrics': 'daily',
-  'today\'s data': 'daily',
-  'daily analytics': 'daily',
-  'today\'s performance': 'daily',
   
-  // Daily report (comprehensive form answers)
+  // Daily report (form answers)
+  'what are my tasks today?': 'daily_report',
+  'what do i need to do today?': 'daily_report',
+  'what should i check today?': 'daily_report',
   'daily report': 'daily_report',
   'daily tasks': 'daily_report',
-  'what tasks today': 'daily_report',
-  'summary of tasks today': 'daily_report',
-  'generate daily report': 'daily_report',
-  'form daily': 'form_daily',
   
-  // ============ SEND VOLUME ============
+  // ============ SEND VOLUME QUESTIONS ============
+  // Primary question format
+  'is send volume normal?': 'send_volume',
+  'how many emails did we send?': 'send_volume',
+  'what is the send volume?': 'send_volume',
+  'are we sending enough emails?': 'send_volume',
+  // Short aliases
   'send volume': 'send_volume',
-  'check send volume': 'send_volume',
-  'is send volume low': 'send_volume',
   'volume': 'send_volume',
-  'sending': 'send_volume',
-  'how many emails sent': 'send_volume',
-  'emails sent today': 'send_volume',
-  'send rate': 'send_volume',
   
   // 7-day send volume
+  'is send volume abnormally low for the past 7 days?': 'send_volume_7d',
+  'how is the weekly send volume?': 'send_volume_7d',
+  'what is the 7 day send trend?': 'send_volume_7d',
   'send volume 7d': 'send_volume_7d',
-  'send volume 7 days': 'send_volume_7d',
-  'weekly send volume': 'send_volume_7d',
-  'is send volume abnormally low for the past 7 days': 'send_volume_7d',
-  'send trend': 'send_volume_7d',
   
-  // ============ LOW LEADS ============
+  // ============ LOW LEADS QUESTIONS ============
+  // Primary question format
+  'which campaigns need leads?': 'low_leads',
+  'what campaigns are low on leads?': 'low_leads',
+  'which campaigns have under 3000 leads?': 'low_leads',
+  'who needs a new list?': 'low_leads',
+  'are any campaigns running out of leads?': 'low_leads',
+  // Short aliases
   'low leads': 'low_leads',
-  'campaigns under 3000 leads': 'low_leads',
-  'which campaigns need leads': 'low_leads',
-  'show campaigns with low leads': 'low_leads',
   'need leads': 'low_leads',
-  'campaigns with low leads': 'low_leads',
-  'which campaigns have under 3000 leads': 'low_leads',
-  'campaigns that need new list': 'low_leads',
-  'leads running low': 'low_leads',
-  'need new list': 'low_leads',
   
-  // ============ BLOCKED DOMAINS / ESP CHECK ============
-  'blocked domains': 'blocked_domains',
-  'check microsoft proofpoint mimecast cisco': 'blocked_domains',
-  'scan for blocked emails': 'blocked_domains',
-  'blocked email providers': 'blocked_domains',
+  // ============ BLOCKED DOMAINS QUESTIONS ============
+  // Primary question format
+  'do any campaigns have blocked leads?': 'blocked_domains',
+  'are there microsoft or proofpoint leads?': 'blocked_domains',
+  'do any campaigns have microsoft proofpoint mimecast or cisco leads?': 'esp_check',
+  'which campaigns have esp blocked leads?': 'esp_check',
+  // Short aliases
   'blocked': 'blocked_domains',
   'esp check': 'esp_check',
-  'microsoft leads': 'esp_check',
-  'proofpoint leads': 'esp_check',
-  'mimecast leads': 'esp_check',
-  'cisco leads': 'esp_check',
-  'do any campaigns have microsoft proofpoint mimecast or cisco leads': 'esp_check',
-  'campaigns launched today with microsoft': 'esp_check',
   
-  // ============ WEEKLY COMMANDS ============
-  'w': 'weekly',
+  // ============ WEEKLY QUESTIONS ============
+  // Primary question format
+  'how was this week?': 'weekly',
+  'what happened this week?': 'weekly',
+  'how did we do this week?': 'weekly',
+  'what are the weekly numbers?': 'weekly',
+  'show me the last 7 days': 'weekly',
+  // Short aliases
   'weekly': 'weekly',
   'this week': 'weekly',
   'last 7 days': 'weekly',
-  '7 day': 'weekly',
-  'week report': 'weekly',
-  'weekly stats': 'weekly',
-  'weekly analytics': 'weekly',
-  '7 day stats': 'weekly',
-  'week data': 'weekly',
-  'past week': 'weekly',
   
-  // Weekly report (comprehensive form answers)
-  'weekly report': 'weekly_report',
+  // Weekly report (form answers)
+  'what should i check this week?': 'weekly_report',
+  'what are my weekly tasks?': 'weekly_report',
   'wednesday checklist': 'weekly_report',
-  'wednesday tasks': 'weekly_report',
-  'generate weekly report': 'weekly_report',
-  'form weekly': 'form_weekly',
+  'weekly report': 'weekly_report',
   
   // Weekly summary (full checklist)
   'weekly summary': 'weekly_summary',
-  'show wednesday checklist': 'weekly_summary',
-  'full weekly': 'weekly_summary',
-  'all weekly checks': 'weekly_summary',
   
-  // ============ BENCHMARKS ============
+  // ============ BENCHMARK QUESTIONS ============
+  // Primary question format
+  'are campaigns hitting benchmarks?': 'benchmarks',
+  'which campaigns are underperforming?': 'benchmarks',
+  'what campaigns are below target?': 'benchmarks',
+  'are any campaigns not hitting targets?': 'underperforming',
+  // Short aliases
   'benchmarks': 'benchmarks',
-  'campaigns below benchmarks': 'benchmarks',
-  'benchmark check': 'benchmarks',
-  'which campaigns not hitting targets': 'benchmarks',
-  'are campaigns hitting benchmarks': 'benchmarks',
-  'below target': 'benchmarks',
-  'underperforming campaigns': 'underperforming',
   'underperforming': 'underperforming',
-  'not hitting benchmarks': 'underperforming',
-  'campaigns not performing': 'underperforming',
   
-  // ============ CONVERSION ============
+  // ============ CONVERSION QUESTIONS ============
+  // Primary question format
+  'what is the positive reply to meeting rate?': 'conversion',
+  'how is our booking conversion?': 'conversion',
+  'which campaigns have low conversion?': 'low_conversion',
+  'what campaigns have sub 40% conversion?': 'low_conversion',
+  'are subsequences working?': 'low_conversion',
+  // Short aliases
   'conversion': 'conversion',
-  'positive reply to meeting': 'conversion',
-  'sub 40% conversion': 'conversion',
-  'meeting conversion rates': 'conversion',
-  'subsequences': 'conversion',
   'low conversion': 'low_conversion',
-  'sub 40%': 'low_conversion',
-  'campaigns with sub 40% positive reply to meeting ratio': 'low_conversion',
-  'broken subsequences': 'low_conversion',
-  'booking rate': 'conversion',
-  'meeting rate': 'conversion',
-  'meetings booked': 'meetings_booked',
-  'how many meetings': 'meetings_booked',
   
-  // ============ INBOX HEALTH ============
+  // Meetings
+  'how many meetings did we book?': 'meetings_booked',
+  'what meetings were booked?': 'meetings_booked',
+  'meetings booked': 'meetings_booked',
+  
+  // ============ INBOX HEALTH QUESTIONS ============
+  // Primary question format
+  'are there any inbox issues?': 'inbox_health',
+  'what is the inbox health?': 'inbox_health',
+  'are there disconnected inboxes?': 'inbox_issues',
+  'which inboxes have errors?': 'inbox_issues',
+  'are there disconnected inboxes or inboxes with sending errors?': 'inbox_issues',
+  'what inboxes have problems?': 'inbox_issues',
+  // Short aliases
   'inbox health': 'inbox_health',
-  'disconnected inboxes': 'inbox_health',
-  'inbox errors': 'inbox_health',
-  'check inbox status': 'inbox_health',
   'inboxes': 'inbox_health',
   'inbox issues': 'inbox_issues',
-  'sending errors': 'inbox_issues',
-  'are there disconnected inboxes or inboxes with sending errors': 'inbox_issues',
-  'inbox status': 'inbox_health',
-  'email accounts': 'inbox_health',
-  'accounts': 'inbox_health',
-  'list accounts': 'inbox_health',
-  'all inboxes': 'inbox_health',
   
   // Removed inboxes
+  'which inboxes were removed?': 'removed_inboxes',
   'removed inboxes': 'removed_inboxes',
-  'tag removal report': 'removed_inboxes',
-  'inboxes removed this week': 'removed_inboxes',
-  'removed': 'removed_inboxes',
   
   // Warmup
+  'what is the warmup status?': 'warmup_status',
+  'how are inbox health scores?': 'warmup_status',
   'warmup': 'warmup_status',
-  'warmup status': 'warmup_status',
-  'warmup analytics': 'warmup_status',
-  'health scores': 'warmup_status',
   
-  // ============ REPLY TRENDS ============
+  // ============ TREND QUESTIONS ============
+  // Primary question format
+  'are reply rates declining?': 'reply_trends',
+  'are reply rates trending downward?': 'reply_trends',
+  'how are reply rate trends?': 'reply_trends',
+  'what is the reply rate trend?': 'reply_trends',
+  // Short aliases
   'reply trends': 'reply_trends',
-  'trending downward': 'reply_trends',
-  'reply rate trends': 'reply_trends',
-  'check trends': 'reply_trends',
   'trends': 'reply_trends',
-  'are reply rates trending downward': 'reply_trends',
-  'are reply rates declining': 'reply_trends',
-  'reply rate over time': 'reply_trends',
   
   // Bad variants
+  'which email variants are underperforming?': 'bad_variants',
+  'what variants should i trim?': 'bad_variants',
   'bad variants': 'bad_variants',
-  'underperforming variants': 'bad_variants',
-  'variant analytics': 'bad_variants',
-  'step performance': 'bad_variants',
-  'worst variants': 'bad_variants',
-  'trim variants': 'bad_variants',
   
-  // ============ LEADS ============
+  // ============ LEAD QUESTIONS ============
+  // Primary question format
+  'how many leads do we have?': 'leads',
+  'what is the lead status?': 'leads',
+  'who is interested?': 'interested',
+  'which leads are interested?': 'interested',
+  'who showed interest?': 'interested',
+  // Short aliases
   'leads': 'leads',
-  'list leads': 'leads',
-  'all leads': 'leads',
-  'contacts': 'leads',
   'interested': 'interested',
-  'interested leads': 'interested',
-  'positive leads': 'interested',
-  'positive replies': 'interested',
-  'who is interested': 'interested',
   
-  // ============ LEAD LISTS ============
+  // Lead lists
+  'what lead lists are available?': 'lead_lists',
+  'show me the lead lists': 'lead_lists',
   'lead lists': 'lead_lists',
-  'lists': 'lead_lists',
-  'show lead lists': 'lead_lists',
-  'available lists': 'lead_lists',
-  'my lists': 'lead_lists',
   
-  // ============ TAGS ============
+  // ============ RESOURCE QUESTIONS ============
+  // Tags
+  'what tags do we have?': 'tags',
+  'show me all tags': 'tags',
   'tags': 'tags',
-  'custom tags': 'tags',
-  'list tags': 'tags',
-  'inbox tags': 'tags',
-  'campaign tags': 'tags',
-  'accounts by tag': 'accounts_by_tag',
-  'inboxes by tag': 'accounts_by_tag',
-  'filter by tag': 'accounts_by_tag',
   
-  // ============ BLOCK LIST ============
+  // Block list
+  'what is on the block list?': 'block_list',
+  'show blocked entries': 'block_list',
   'block list': 'block_list',
-  'blocklist': 'block_list',
-  'blocked list': 'block_list',
-  'show blocked': 'block_list',
-  'blocked entries': 'block_list',
   
-  // ============ TEMPLATES ============
+  // Templates
+  'what email templates do we have?': 'templates',
+  'show me the templates': 'templates',
   'templates': 'templates',
-  'email templates': 'templates',
-  'show templates': 'templates',
-  'my templates': 'templates',
   
-  // ============ SUBSEQUENCES ============
-  'campaign subsequences': 'subsequences',
-  'follow ups': 'subsequences',
-  'follow up sequences': 'subsequences',
+  // Subsequences
+  'what subsequences exist?': 'subsequences',
+  'show follow up sequences': 'subsequences',
+  'subsequences': 'subsequences',
   
-  // ============ WORKSPACE ============
+  // ============ WORKSPACE QUESTIONS ============
+  'what workspace am i in?': 'workspace',
+  'show workspace info': 'workspace',
   'workspace': 'workspace',
-  'my workspace': 'workspace',
-  'workspace info': 'workspace',
-  'team': 'team',
-  'team members': 'team',
-  'workspace members': 'team',
-  'audit log': 'audit_log',
-  'activity log': 'audit_log',
-  'history': 'audit_log',
-  'billing': 'billing',
-  'usage': 'billing',
-  'api usage': 'billing',
   
-  // ============ DIAGNOSTICS ============
+  'who is on my team?': 'team',
+  'show team members': 'team',
+  'team': 'team',
+  
+  'what activity happened recently?': 'audit_log',
+  'show audit log': 'audit_log',
+  'audit log': 'audit_log',
+  
+  'what is my api usage?': 'billing',
+  'billing': 'billing',
+  
+  // ============ DIAGNOSTIC QUESTIONS ============
+  'why is this campaign underperforming?': 'diagnose',
+  'what is wrong with this campaign?': 'diagnose',
   'diagnose': 'diagnose',
-  'analyze': 'diagnose',
-  'what\'s wrong with': 'diagnose',
-  'why is': 'diagnose',
+  
+  'is this email valid?': 'verify_email',
   'verify email': 'verify_email',
-  'check email': 'verify_email',
-  'validate email': 'verify_email',
   
   // ============ UTILITY ============
+  'what commands are available?': 'help',
+  'how do i use this?': 'help',
   'help': 'help',
   '?': 'help',
-  'commands': 'help',
-  'status': 'status',
-  'api status': 'status',
-  'connection': 'status',
+  
+  'is the api connected?': 'status',
   'test connection': 'status',
+  'status': 'status',
 };
 
 // Blocked domains to check (exclude Barracuda)

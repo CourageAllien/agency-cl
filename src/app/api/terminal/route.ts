@@ -7,6 +7,11 @@ import { BENCHMARKS } from '@/lib/engine/benchmarks';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+// Helper to create timeout promise
+function createTimeout<T>(ms: number, fallbackValue: T): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(fallbackValue), ms));
+}
+
 // Fetch dashboard data for Claude queries
 async function getDashboardData() {
   try {
@@ -28,16 +33,29 @@ async function getDashboardData() {
 }
 
 export async function POST(request: Request) {
+  const startTime = Date.now();
+  
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body', response: '⚠️ Invalid request format. Please try again.' },
+        { status: 400 }
+      );
+    }
+    
     const { query, queryType, useClaudeAI = false } = body;
 
     if (!query && !queryType) {
       return NextResponse.json(
-        { error: 'Query or queryType is required' },
+        { error: 'Query or queryType is required', response: '⚠️ Please enter a question or command.' },
         { status: 400 }
       );
     }
+
+    console.log(`[Terminal] Processing: "${query}" (type: ${queryType || 'auto'})`);
 
     // Check if this is a structured command or free-form query
     const command = parseCommand(query || '');
@@ -46,17 +64,47 @@ export async function POST(request: Request) {
     if (command !== 'unknown' && !useClaudeAI) {
       console.log(`[Terminal] Executing command: ${command}`);
       
-      const forceRefresh = (query || '').toLowerCase().startsWith('refresh ');
-      const result = await executeCommand(query, forceRefresh);
-      
-      return NextResponse.json({
-        type: 'command',
-        command: command,
-        response: formatCommandResponse(result),
-        structured: result,
-        timestamp: new Date().toISOString(),
-        dataSource: 'instantly',
-      });
+      try {
+        const forceRefresh = (query || '').toLowerCase().startsWith('refresh ');
+        
+        // Execute with timeout protection
+        const result = await Promise.race([
+          executeCommand(query, forceRefresh),
+          createTimeout(55000, null) // 55 second timeout (Vercel limit is 60s)
+        ]);
+        
+        if (!result) {
+          console.error('[Terminal] Command timed out');
+          return NextResponse.json({
+            type: 'command',
+            command: command,
+            response: '⏱️ **Request timed out**\n\nThe query is taking too long. Please try a simpler question or try again.',
+            timestamp: new Date().toISOString(),
+            dataSource: 'timeout',
+          });
+        }
+        
+        const duration = Date.now() - startTime;
+        console.log(`[Terminal] Command completed in ${duration}ms`);
+        
+        return NextResponse.json({
+          type: 'command',
+          command: command,
+          response: formatCommandResponse(result),
+          structured: result,
+          timestamp: new Date().toISOString(),
+          dataSource: 'instantly',
+        });
+      } catch (cmdError) {
+        console.error('[Terminal] Command execution error:', cmdError);
+        return NextResponse.json({
+          type: 'error',
+          command: command,
+          response: `⚠️ **Error processing command**\n\n${cmdError instanceof Error ? cmdError.message : 'Unknown error'}\n\nPlease try again or ask a different question.`,
+          timestamp: new Date().toISOString(),
+          dataSource: 'error',
+        });
+      }
     }
 
     // For unknown commands or Claude AI requests, use Claude
@@ -139,11 +187,16 @@ export async function POST(request: Request) {
     }
 
     if (result.error) {
-      return NextResponse.json(
-        { error: result.error },
-        { status: 500 }
-      );
+      return NextResponse.json({
+        type: 'error',
+        response: `⚠️ **Error**\n\n${result.error}\n\nPlease try again.`,
+        timestamp: new Date().toISOString(),
+        dataSource: 'error',
+      });
     }
+
+    const duration = Date.now() - startTime;
+    console.log(`[Terminal] Claude query completed in ${duration}ms`);
 
     return NextResponse.json({
       type: 'claude',
@@ -153,11 +206,13 @@ export async function POST(request: Request) {
       dataSource: dashboardData.success ? 'instantly' : 'fallback',
     });
   } catch (error) {
-    console.error('Terminal API error:', error);
-    return NextResponse.json(
-      { error: 'Failed to process query' },
-      { status: 500 }
-    );
+    console.error('[Terminal] API error:', error);
+    return NextResponse.json({
+      type: 'error',
+      response: `⚠️ **Connection Error**\n\n${error instanceof Error ? error.message : 'Failed to process query'}\n\nPlease check your API connection and try again.`,
+      timestamp: new Date().toISOString(),
+      dataSource: 'error',
+    });
   }
 }
 

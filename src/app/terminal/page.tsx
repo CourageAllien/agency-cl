@@ -37,70 +37,65 @@ interface Message {
   isTyping?: boolean;
 }
 
-// Quick suggestion chips - organized by use case
+// Quick suggestion chips - NATURAL LANGUAGE QUESTIONS
 const QUICK_SUGGESTIONS = [
-  { label: "📊 Campaigns", query: "list" },
-  { label: "📋 Daily Report", query: "daily report" },
-  { label: "📈 Weekly Report", query: "weekly report" },
-  { label: "📧 Inbox Health", query: "inbox health" },
-  { label: "🚨 Low Leads", query: "low leads" },
-  { label: "📉 Benchmarks", query: "benchmarks" },
+  { label: "📊 What campaigns are active?", query: "what campaigns are active?" },
+  { label: "📋 What are my tasks today?", query: "what are my tasks today?" },
+  { label: "📈 How was this week?", query: "how was this week?" },
+  { label: "📧 Are there any inbox issues?", query: "are there any inbox issues?" },
+  { label: "🚨 Which campaigns need leads?", query: "which campaigns need leads?" },
+  { label: "📉 Are campaigns hitting benchmarks?", query: "are campaigns hitting benchmarks?" },
 ];
 
-// Extended suggestions for after first query
+// Extended suggestions for after first query - NATURAL LANGUAGE QUESTIONS
 const MORE_SUGGESTIONS = [
-  { label: "Conversion", query: "conversion" },
-  { label: "Reply Trends", query: "reply trends" },
-  { label: "Send Volume 7d", query: "send volume 7d" },
-  { label: "Interested", query: "interested" },
-  { label: "Meetings", query: "meetings booked" },
-  { label: "Diagnose", query: "diagnose" },
-  { label: "Tags", query: "tags" },
-  { label: "Templates", query: "templates" },
+  { label: "What is the conversion rate?", query: "what is the positive reply to meeting rate?" },
+  { label: "Are reply rates declining?", query: "are reply rates declining?" },
+  { label: "Is send volume normal?", query: "is send volume abnormally low for the past 7 days?" },
+  { label: "Who is interested?", query: "who is interested?" },
+  { label: "How many meetings booked?", query: "how many meetings did we book?" },
+  { label: "What tags do we have?", query: "what tags do we have?" },
+  { label: "What templates exist?", query: "what email templates do we have?" },
+  { label: "What commands available?", query: "what commands are available?" },
 ];
 
 const COMMAND_HELP = [
-  { category: "📋 Daily Tasks", commands: [
-    { cmd: "daily", desc: "Today's campaign analysis" },
-    { cmd: "daily report", desc: "Full daily form answers" },
-    { cmd: "send volume", desc: "Check send volume" },
-    { cmd: "send volume 7d", desc: "7-day send trend" },
-    { cmd: "low leads", desc: "Campaigns <3000 leads" },
+  { category: "📋 Daily Questions", commands: [
+    { cmd: "What happened today?", desc: "Today's analysis" },
+    { cmd: "What are my tasks today?", desc: "Daily checklist" },
+    { cmd: "Is send volume normal?", desc: "Check volume" },
+    { cmd: "Is send volume abnormally low for the past 7 days?", desc: "7-day trend" },
+    { cmd: "Which campaigns need leads?", desc: "Low lead alerts" },
   ]},
-  { category: "📊 Weekly Tasks", commands: [
-    { cmd: "weekly", desc: "7-day performance" },
-    { cmd: "weekly report", desc: "Wednesday form answers" },
-    { cmd: "benchmarks", desc: "Below target campaigns" },
-    { cmd: "conversion", desc: "Positive reply to meeting" },
-    { cmd: "bad variants", desc: "Underperforming variants" },
-    { cmd: "reply trends", desc: "Reply rate trends" },
+  { category: "📊 Weekly Questions", commands: [
+    { cmd: "How was this week?", desc: "7-day performance" },
+    { cmd: "What should I check this week?", desc: "Weekly tasks" },
+    { cmd: "Are campaigns hitting benchmarks?", desc: "Target check" },
+    { cmd: "What is the positive reply to meeting rate?", desc: "Conversion" },
+    { cmd: "Which email variants are underperforming?", desc: "Variant check" },
+    { cmd: "Are reply rates declining?", desc: "Trend analysis" },
   ]},
-  { category: "📧 Inboxes", commands: [
-    { cmd: "inbox health", desc: "Full inbox report" },
-    { cmd: "inbox issues", desc: "Disconnected/errors by tag" },
-    { cmd: "warmup", desc: "Warmup status" },
+  { category: "📧 Inbox Questions", commands: [
+    { cmd: "Are there any inbox issues?", desc: "Full report" },
+    { cmd: "Are there disconnected inboxes?", desc: "Error check" },
+    { cmd: "What is the warmup status?", desc: "Health scores" },
   ]},
-  { category: "👥 Leads", commands: [
-    { cmd: "leads", desc: "Lead overview" },
-    { cmd: "interested", desc: "Positive leads" },
-    { cmd: "meetings booked", desc: "Booked leads" },
-    { cmd: "lead lists", desc: "View lead lists" },
+  { category: "👥 Lead Questions", commands: [
+    { cmd: "How many leads do we have?", desc: "Overview" },
+    { cmd: "Who is interested?", desc: "Positive leads" },
+    { cmd: "How many meetings did we book?", desc: "Bookings" },
+    { cmd: "What lead lists are available?", desc: "View lists" },
   ]},
-  { category: "🏷️ Resources", commands: [
-    { cmd: "campaigns / list", desc: "All campaigns with analysis" },
-    { cmd: "tags", desc: "Custom tags" },
-    { cmd: "templates", desc: "Email templates" },
-    { cmd: "block list", desc: "Blocked entries" },
+  { category: "🏷️ Resource Questions", commands: [
+    { cmd: "What campaigns are active?", desc: "Full analysis" },
+    { cmd: "What tags do we have?", desc: "Custom tags" },
+    { cmd: "What email templates do we have?", desc: "Templates" },
+    { cmd: "What is on the block list?", desc: "Blocked entries" },
   ]},
-  { category: "🔍 Diagnostics", commands: [
-    { cmd: "diagnose [name]", desc: "Diagnose specific campaign" },
-    { cmd: "verify [email]", desc: "Verify email address" },
-    { cmd: "status", desc: "Check API connection" },
-  ]},
-  { category: "💬 Natural Language", commands: [
-    { cmd: "Which campaigns need leads?", desc: "Question format" },
-    { cmd: "How is [campaign] doing?", desc: "Campaign-specific" },
-    { cmd: "What are my tasks today?", desc: "Task summary" },
+  { category: "🔍 Diagnostic Questions", commands: [
+    { cmd: "Why is this campaign underperforming?", desc: "Diagnose" },
+    { cmd: "Is this email valid?", desc: "Verify email" },
+    { cmd: "Is the API connected?", desc: "Status check" },
   ]},
 ];
 
@@ -154,11 +149,17 @@ export default function TerminalPage() {
     }]);
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 58000); // 58 second timeout
+      
       const response = await fetch('/api/terminal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
 
       const data = await response.json();
 
@@ -166,15 +167,30 @@ export default function TerminalPage() {
       setMessages((prev) => prev.filter(m => m.id !== typingId).concat({
         id: typingId,
         role: "assistant",
-        content: data.response || "I couldn't process that request. Please try again.",
+        content: data.response || "I couldn't process that request. Please try a different question.",
         timestamp: new Date(),
       }));
     } catch (error) {
       console.error('Terminal error:', error);
+      
+      let errorMessage = "⚠️ **Connection Error**\n\n";
+      
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          errorMessage += "The request took too long and was cancelled.\n\nTry a simpler question like:\n• \"What campaigns are active?\"\n• \"Are there inbox issues?\"\n• \"status\"";
+        } else if (error.message.includes('fetch')) {
+          errorMessage += "Could not connect to the server.\n\nPlease check your internet connection and try again.";
+        } else {
+          errorMessage += `${error.message}\n\nPlease try again.`;
+        }
+      } else {
+        errorMessage += "An unexpected error occurred. Please try again.";
+      }
+      
       setMessages((prev) => prev.filter(m => m.id !== typingId).concat({
         id: typingId,
         role: "assistant",
-        content: "⚠️ Connection error. Please try again.",
+        content: errorMessage,
         timestamp: new Date(),
       }));
     } finally {
@@ -339,14 +355,14 @@ export default function TerminalPage() {
               
               {/* Primary Action */}
               <button
-                onClick={() => handleSubmit("list")}
+                onClick={() => handleSubmit("what campaigns are active?")}
                 className="flex items-center gap-3 p-4 rounded-xl border-2 border-primary/50 bg-primary/5 hover:bg-primary/10 transition-colors text-left w-full max-w-md mb-4"
               >
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                   <ListChecks className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <div className="font-semibold text-sm">List All Active Campaigns</div>
+                  <div className="font-semibold text-sm">What campaigns are active?</div>
                   <div className="text-xs text-muted-foreground">Full analysis with classification & actions</div>
                 </div>
               </button>
@@ -354,22 +370,22 @@ export default function TerminalPage() {
               {/* Quick Actions */}
               <div className="grid grid-cols-2 gap-3 w-full max-w-md mb-6">
                 <button
-                  onClick={() => handleSubmit("daily")}
+                  onClick={() => handleSubmit("what are my tasks today?")}
                   className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left"
                 >
                   <CalendarDays className="h-5 w-5 text-primary" />
                   <div>
-                    <div className="font-medium text-sm">Daily Report</div>
-                    <div className="text-xs text-muted-foreground">Today&apos;s metrics</div>
+                    <div className="font-medium text-sm">What are my tasks today?</div>
+                    <div className="text-xs text-muted-foreground">Daily checklist</div>
                   </div>
                 </button>
                 <button
-                  onClick={() => handleSubmit("weekly")}
+                  onClick={() => handleSubmit("how was this week?")}
                   className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left"
                 >
                   <Calendar className="h-5 w-5 text-primary" />
                   <div>
-                    <div className="font-medium text-sm">Weekly Report</div>
+                    <div className="font-medium text-sm">How was this week?</div>
                     <div className="text-xs text-muted-foreground">7-day analysis</div>
                   </div>
                 </button>
@@ -518,7 +534,7 @@ export default function TerminalPage() {
           </div>
           
           <p className="mt-2 text-center text-xs text-muted-foreground">
-            Try: &quot;daily&quot;, &quot;weekly&quot;, or ask any question about your campaigns
+            Ask questions like: &quot;What campaigns need leads?&quot; or &quot;Are there inbox issues?&quot;
           </p>
         </div>
       </div>

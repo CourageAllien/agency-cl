@@ -101,94 +101,171 @@ export function parseCommand(input: string): CommandType {
     }
   }
   
-  // Fuzzy matching for common patterns
-  const fuzzyPatterns: [RegExp, CommandType][] = [
-    // Campaign queries
-    [/\b(list|campaigns|all campaigns|active campaigns|campaign list|show campaigns)\b/i, 'campaigns'],
-    [/\b(campaign analytics|campaign stats|campaign performance)\b/i, 'campaigns'],
+  // NATURAL LANGUAGE QUESTION PATTERNS (primary matching)
+  const questionPatterns: [RegExp, CommandType][] = [
+    // Campaign questions
+    [/what.{0,10}campaigns?.{0,10}(active|running|doing)/i, 'campaigns'],
+    [/how.{0,10}(are|is).{0,10}(my|our|the)?.{0,10}campaigns?/i, 'campaigns'],
+    [/show.{0,10}(me|all)?.{0,10}campaigns?/i, 'campaigns'],
+    [/what.{0,10}(is|are).{0,10}(the)?.{0,10}status/i, 'campaigns'],
     
-    // Time-based queries
-    [/\b(today|today's|daily stats|daily analytics)\b/i, 'daily'],
-    [/\b(this week|last 7 days|7.?day|weekly|week stats|week analytics)\b/i, 'weekly'],
-    [/\b(daily report|daily tasks|today's tasks)\b/i, 'daily_report'],
-    [/\b(weekly report|wednesday|full weekly)\b/i, 'weekly_report'],
+    // Daily questions
+    [/what.{0,10}(happened|did).{0,10}today/i, 'daily'],
+    [/how.{0,10}(did|was).{0,10}(we|it).{0,10}(do)?.{0,10}today/i, 'daily'],
+    [/what.{0,10}(are)?.{0,10}today.{0,5}(numbers?|metrics?|performance)/i, 'daily'],
+    [/what.{0,10}(are|do).{0,10}(my|i).{0,10}tasks?.{0,10}today/i, 'daily_report'],
+    [/what.{0,10}(should|do).{0,10}(i|we).{0,10}(check|do|need)/i, 'daily_report'],
     
-    // Send volume
-    [/\b(send volume|sending|emails sent|how many sent)\b/i, 'send_volume'],
-    [/\b(send volume.{0,10}7|7.{0,5}day.{0,5}send|weekly send)\b/i, 'send_volume_7d'],
+    // Weekly questions
+    [/how.{0,10}(was|did).{0,10}(this)?.{0,10}week/i, 'weekly'],
+    [/what.{0,10}(happened|are).{0,10}(this)?.{0,10}week/i, 'weekly'],
+    [/what.{0,10}(are)?.{0,10}(the)?.{0,10}(weekly|7.?day).{0,10}(numbers?|metrics?)/i, 'weekly'],
+    [/what.{0,10}(should|do).{0,10}(i|we).{0,10}check.{0,10}(this)?.{0,10}week/i, 'weekly_report'],
     
-    // Leads
-    [/\b(low leads|need leads|under 3000|campaigns.{0,10}leads)\b/i, 'low_leads'],
-    [/\b(interested leads|positive leads|positive replies)\b/i, 'interested'],
-    [/\b(meetings? booked|booked leads)\b/i, 'meetings_booked'],
-    [/\b(lead lists?|my lists|available lists)\b/i, 'lead_lists'],
+    // Send volume questions
+    [/is.{0,10}send.{0,10}volume.{0,10}(normal|ok|good|low|abnormal)/i, 'send_volume'],
+    [/how.{0,10}many.{0,10}(emails?|messages?)?.{0,10}(did.{0,10}we|were).{0,10}(send|sent)/i, 'send_volume'],
+    [/are.{0,10}(we)?.{0,10}sending.{0,10}enough/i, 'send_volume'],
+    [/send.{0,10}volume.{0,10}(abnormal|7|past|last)/i, 'send_volume_7d'],
     
-    // ESP/Blocked domains
-    [/\b(blocked|microsoft|proofpoint|mimecast|cisco|esp check)\b/i, 'blocked_domains'],
-    [/\b(block list|blocklist|blocked entries)\b/i, 'block_list'],
+    // Lead questions
+    [/which.{0,10}campaigns?.{0,10}(need|low|require).{0,10}leads?/i, 'low_leads'],
+    [/what.{0,10}campaigns?.{0,10}(are)?.{0,10}low.{0,10}(on)?.{0,10}leads?/i, 'low_leads'],
+    [/who.{0,10}(needs?|requires?).{0,10}(a)?.{0,10}(new)?.{0,10}list/i, 'low_leads'],
+    [/(are)?.{0,10}(any)?.{0,10}campaigns?.{0,10}running.{0,10}out.{0,10}(of)?.{0,10}leads?/i, 'low_leads'],
+    [/under.{0,10}3000.{0,10}leads?/i, 'low_leads'],
     
-    // Performance
-    [/\b(benchmark|target|hitting|underperform)\b/i, 'benchmarks'],
-    [/\b(conversion|meeting rate|40%|booking rate)\b/i, 'conversion'],
-    [/\b(low conversion|sub 40|broken subsequence)\b/i, 'low_conversion'],
-    [/\b(bad variant|underperforming variant|worst variant|trim variant)\b/i, 'bad_variants'],
+    // Benchmark questions
+    [/are.{0,10}campaigns?.{0,10}hitting.{0,10}benchmarks?/i, 'benchmarks'],
+    [/which.{0,10}campaigns?.{0,10}(are)?.{0,10}underperform/i, 'benchmarks'],
+    [/(are|what).{0,10}(any)?.{0,10}campaigns?.{0,10}(below|not).{0,10}target/i, 'benchmarks'],
     
-    // Inbox
-    [/\b(inbox health|inbox status|email accounts?|list accounts)\b/i, 'inbox_health'],
-    [/\b(disconnect|inbox error|sending error|inbox issue)\b/i, 'inbox_issues'],
-    [/\b(removed inbox|tag removal)\b/i, 'removed_inboxes'],
-    [/\b(warmup|health score)\b/i, 'warmup_status'],
+    // Conversion questions
+    [/what.{0,10}(is)?.{0,10}(the)?.{0,10}(positive)?.{0,10}reply.{0,10}(to)?.{0,10}meeting/i, 'conversion'],
+    [/how.{0,10}(is)?.{0,10}(our|the)?.{0,10}(booking)?.{0,10}conversion/i, 'conversion'],
+    [/which.{0,10}campaigns?.{0,10}(have)?.{0,10}(low|sub).{0,10}(40)?/i, 'low_conversion'],
+    [/(are)?.{0,10}subsequences?.{0,10}working/i, 'low_conversion'],
     
-    // Trends
-    [/\b(trend|declining|downward|reply.{0,5}rate.{0,5}over)\b/i, 'reply_trends'],
+    // Meeting questions
+    [/how.{0,10}many.{0,10}meetings?.{0,10}(did|were|have).{0,10}(we)?.{0,10}(book|booked)/i, 'meetings_booked'],
+    [/what.{0,10}meetings?.{0,10}(were|have).{0,10}booked/i, 'meetings_booked'],
     
-    // Resources
-    [/\b(tags?|custom tags?|inbox tags?)\b/i, 'tags'],
-    [/\b(template|email template)\b/i, 'templates'],
-    [/\b(subsequence|follow.?up)\b/i, 'subsequences'],
+    // Inbox health questions
+    [/(are)?.{0,10}(there)?.{0,10}(any)?.{0,10}inbox.{0,10}(issues?|problems?|errors?)/i, 'inbox_health'],
+    [/what.{0,10}(is)?.{0,10}(the)?.{0,10}inbox.{0,10}health/i, 'inbox_health'],
+    [/(are)?.{0,10}(there)?.{0,10}disconnected.{0,10}inboxes?/i, 'inbox_issues'],
+    [/which.{0,10}inboxes?.{0,10}(have)?.{0,10}(errors?|issues?|problems?)/i, 'inbox_issues'],
+    [/(are)?.{0,10}(there)?.{0,10}(disconnected|sending).{0,10}(inboxes?|errors?)/i, 'inbox_issues'],
+    [/what.{0,10}inboxes?.{0,10}(have)?.{0,10}problems?/i, 'inbox_issues'],
     
-    // Workspace
-    [/\b(workspace|my workspace)\b/i, 'workspace'],
-    [/\b(team|members?)\b/i, 'team'],
-    [/\b(audit|activity|history)\b/i, 'audit_log'],
-    [/\b(billing|usage|api usage)\b/i, 'billing'],
+    // Warmup questions
+    [/what.{0,10}(is)?.{0,10}(the)?.{0,10}warmup.{0,10}status/i, 'warmup_status'],
+    [/how.{0,10}(are)?.{0,10}(inbox)?.{0,10}health.{0,10}scores?/i, 'warmup_status'],
     
-    // Diagnostics
-    [/\b(diagnose|analyze|what'?s wrong)\b/i, 'diagnose'],
-    [/\b(verify email|check email|validate email)\b/i, 'verify_email'],
+    // Trend questions
+    [/(are)?.{0,10}reply.{0,10}rates?.{0,10}(declining|trending|going)/i, 'reply_trends'],
+    [/what.{0,10}(is)?.{0,10}(the)?.{0,10}reply.{0,10}rate.{0,10}trend/i, 'reply_trends'],
     
-    // Reports/Forms
-    [/\b(form.{0,5}daily|daily.{0,5}form|generate.{0,5}daily)\b/i, 'form_daily'],
-    [/\b(form.{0,5}weekly|weekly.{0,5}form|generate.{0,5}weekly)\b/i, 'form_weekly'],
+    // Variant questions
+    [/which.{0,10}(email)?.{0,10}variants?.{0,10}(are)?.{0,10}underperform/i, 'bad_variants'],
+    [/what.{0,10}variants?.{0,10}(should)?.{0,10}(i)?.{0,10}trim/i, 'bad_variants'],
     
-    // Utility
-    [/\b(help|\?|commands?)\b/i, 'help'],
-    [/\b(status|connection|api status|test connection)\b/i, 'status'],
+    // Lead count questions
+    [/how.{0,10}many.{0,10}leads?.{0,10}(do|did).{0,10}(we|i).{0,10}have/i, 'leads'],
+    [/what.{0,10}(is)?.{0,10}(the)?.{0,10}lead.{0,10}(status|count)/i, 'leads'],
+    [/who.{0,10}(is|showed).{0,10}interested/i, 'interested'],
+    [/which.{0,10}leads?.{0,10}(are)?.{0,10}interested/i, 'interested'],
+    
+    // Lead list questions
+    [/what.{0,10}lead.{0,10}lists?.{0,10}(are)?.{0,10}available/i, 'lead_lists'],
+    [/show.{0,10}(me)?.{0,10}(the)?.{0,10}lead.{0,10}lists?/i, 'lead_lists'],
+    
+    // Resource questions
+    [/what.{0,10}tags?.{0,10}(do)?.{0,10}(we)?.{0,10}have/i, 'tags'],
+    [/show.{0,10}(me)?.{0,10}(all)?.{0,10}tags?/i, 'tags'],
+    [/what.{0,10}(is|are).{0,10}(on)?.{0,10}(the)?.{0,10}block.{0,10}list/i, 'block_list'],
+    [/what.{0,10}(email)?.{0,10}templates?.{0,10}(do)?.{0,10}(we)?.{0,10}have/i, 'templates'],
+    [/show.{0,10}(me)?.{0,10}(the)?.{0,10}templates?/i, 'templates'],
+    [/what.{0,10}subsequences?.{0,10}(exist|are)/i, 'subsequences'],
+    
+    // Workspace questions
+    [/what.{0,10}workspace.{0,10}(am|are).{0,10}(i|we).{0,10}in/i, 'workspace'],
+    [/who.{0,10}(is)?.{0,10}on.{0,10}(my|the)?.{0,10}team/i, 'team'],
+    [/what.{0,10}activity.{0,10}(happened|occurred)/i, 'audit_log'],
+    [/what.{0,10}(is)?.{0,10}(my|our)?.{0,10}api.{0,10}usage/i, 'billing'],
+    
+    // Diagnostic questions
+    [/why.{0,10}(is)?.{0,10}(this)?.{0,10}campaign.{0,10}underperform/i, 'diagnose'],
+    [/what.{0,10}(is)?.{0,10}wrong.{0,10}(with)?.{0,10}(this)?.{0,10}campaign/i, 'diagnose'],
+    [/(is)?.{0,10}(this)?.{0,10}email.{0,10}valid/i, 'verify_email'],
+    
+    // Utility questions
+    [/what.{0,10}commands?.{0,10}(are)?.{0,10}available/i, 'help'],
+    [/how.{0,10}(do)?.{0,10}(i)?.{0,10}use.{0,10}this/i, 'help'],
+    [/(is)?.{0,10}(the)?.{0,10}api.{0,10}connected/i, 'status'],
+    [/test.{0,10}connection/i, 'status'],
   ];
   
-  for (const [pattern, command] of fuzzyPatterns) {
+  for (const [pattern, command] of questionPatterns) {
     if (pattern.test(normalized)) {
       return command;
     }
   }
   
-  // Check for question-based queries
-  if (normalized.includes('?')) {
-    // Try to infer intent from question
-    if (/which.{0,20}(campaign|inbox)/i.test(normalized)) {
-      if (/lead/i.test(normalized)) return 'low_leads';
-      if (/perform|benchmark|target/i.test(normalized)) return 'underperforming';
-      if (/disconnect|error/i.test(normalized)) return 'inbox_issues';
-      return 'campaigns';
-    }
-    if (/how.{0,10}(many|much)/i.test(normalized)) {
-      if (/sent|email/i.test(normalized)) return 'send_volume';
-      if (/lead/i.test(normalized)) return 'low_leads';
-      if (/meeting/i.test(normalized)) return 'conversion';
-      if (/inbox|account/i.test(normalized)) return 'inbox_health';
-    }
-    if (/what.{0,10}(task|do|need)/i.test(normalized)) {
-      return 'daily_report';
+  // Fuzzy matching for common patterns (simpler keywords)
+  const fuzzyPatterns: [RegExp, CommandType][] = [
+    // Campaign queries
+    [/\b(list|campaigns|all campaigns|active campaigns|show campaigns)\b/i, 'campaigns'],
+    
+    // Time-based queries
+    [/\b(today|daily)\b/i, 'daily'],
+    [/\b(this week|last 7 days|7.?day|weekly)\b/i, 'weekly'],
+    
+    // Send volume
+    [/\b(send volume|sending|volume)\b/i, 'send_volume'],
+    
+    // Leads
+    [/\b(low leads|need leads|under 3000)\b/i, 'low_leads'],
+    [/\b(interested|positive leads)\b/i, 'interested'],
+    [/\b(meetings? booked)\b/i, 'meetings_booked'],
+    [/\b(lead lists?)\b/i, 'lead_lists'],
+    
+    // Performance
+    [/\b(benchmark|underperform)\b/i, 'benchmarks'],
+    [/\b(conversion|meeting rate)\b/i, 'conversion'],
+    [/\b(bad variant)\b/i, 'bad_variants'],
+    
+    // Inbox
+    [/\b(inbox|inboxes)\b/i, 'inbox_health'],
+    [/\b(disconnect|sending error)\b/i, 'inbox_issues'],
+    [/\b(warmup|health score)\b/i, 'warmup_status'],
+    
+    // Trends
+    [/\b(trend|declining)\b/i, 'reply_trends'],
+    
+    // Resources
+    [/\b(tags?)\b/i, 'tags'],
+    [/\b(templates?)\b/i, 'templates'],
+    [/\b(block.?list)\b/i, 'block_list'],
+    
+    // Workspace
+    [/\b(workspace)\b/i, 'workspace'],
+    [/\b(team)\b/i, 'team'],
+    [/\b(audit|activity)\b/i, 'audit_log'],
+    [/\b(billing|usage)\b/i, 'billing'],
+    
+    // Diagnostics
+    [/\b(diagnose|analyze)\b/i, 'diagnose'],
+    [/\b(verify email)\b/i, 'verify_email'],
+    
+    // Utility
+    [/\b(help|commands?|\?)\b/i, 'help'],
+    [/\b(status|connection)\b/i, 'status'],
+  ];
+  
+  for (const [pattern, command] of fuzzyPatterns) {
+    if (pattern.test(normalized)) {
+      return command;
     }
   }
   

@@ -58,7 +58,15 @@ export async function GET() {
       return acc;
     }, {} as Record<string, number>);
 
-    // Get inbox health summary
+    // Limit accounts in response to prevent huge payloads (moved up)
+    const accountsWithIssues = transformedAccounts.filter(a => 
+      a.status === 'disconnected' || a.sendingError || a.healthScore < 70
+    );
+    const limitedAccounts = accountsWithIssues.length > 0 
+      ? accountsWithIssues 
+      : transformedAccounts.slice(0, 200);
+
+    // Get inbox health summary (uses ALL accounts for accurate counts)
     const inboxHealth = {
       total: transformedAccounts.length,
       connected: transformedAccounts.filter(a => a.status === 'connected').length,
@@ -67,6 +75,7 @@ export async function GET() {
       avgHealth: portfolioMetrics.avgInboxHealth,
       lowHealth: transformedAccounts.filter(a => a.healthScore < 70).length,
       withErrors: transformedAccounts.filter(a => a.sendingError).length,
+      accountsInResponse: limitedAccounts.length,
     };
 
     // All unique tags
@@ -78,7 +87,7 @@ export async function GET() {
     const response = {
       clients,
       activeClients,
-      accounts: transformedAccounts,
+      accounts: limitedAccounts, // Only send limited accounts
       portfolioMetrics: {
         ...portfolioMetrics,
         totalCampaigns: campaigns.length,

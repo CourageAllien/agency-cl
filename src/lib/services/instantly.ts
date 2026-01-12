@@ -1463,6 +1463,16 @@ class InstantlyService {
     const rawAnalytics = analyticsRes.data || [];
     const rawOverview = analyticsOverviewRes.data || [];
 
+    // DEBUG: Log first raw response to see exact API field names
+    if (rawAnalytics.length > 0) {
+      console.log('[DEBUG] Sample RAW analytics response (first campaign):', JSON.stringify(rawAnalytics[0], null, 2));
+      console.log('[DEBUG] All field names in analytics:', Object.keys(rawAnalytics[0]));
+    }
+    if (rawOverview.length > 0) {
+      console.log('[DEBUG] Sample RAW overview response (first campaign):', JSON.stringify(rawOverview[0], null, 2));
+      console.log('[DEBUG] All field names in overview:', Object.keys(rawOverview[0]));
+    }
+
     // Create lookup maps
     const overviewMap = new Map(rawOverview.map(o => [o.campaign_id, o]));
     const tagMap = new Map(tags.map(t => [t.id, t.name]));
@@ -1472,14 +1482,6 @@ class InstantlyService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const analytics: InstantlyCampaignAnalytics[] = rawAnalytics.map((raw: any) => {
       const overview = overviewMap.get(raw.campaign_id as string);
-      
-      // Debug: Log first campaign's raw data to see actual field names
-      if (raw.campaign_name?.includes('Consumer Optix') || rawAnalytics.indexOf(raw) === 0) {
-        console.log(`[DEBUG] Raw analytics for "${raw.campaign_name}":`, JSON.stringify(raw, null, 2));
-        if (overview) {
-          console.log(`[DEBUG] Overview for "${raw.campaign_name}":`, JSON.stringify(overview, null, 2));
-        }
-      }
       
       // Map actual API field names to our expected names
       // API V2 fields from https://developer.instantly.ai/

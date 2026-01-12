@@ -1,6 +1,6 @@
 // Campaign Terminal Command Processor
 
-import { instantlyService } from '@/lib/services/instantly';
+import { instantlyService, type InstantlyAccount, type InstantlyCampaign } from '@/lib/services/instantly';
 import { terminalCache, rateLimiter } from './cache';
 import {
   CommandType,
@@ -1551,16 +1551,18 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
     }
   }
   
-  let accountData;
-  let campaignData;
+  let accounts: InstantlyAccount[] = [];
   try {
-    console.log('[Terminal] Fetching ALL inbox data from Instantly API...');
-    // Use the dedicated method for fetching all accounts
-    [accountData, campaignData] = await Promise.all([
-      instantlyService.getFullAccountsData(),
-      instantlyService.getFullAnalytics()
-    ]);
-    console.log(`[Terminal] Received ${accountData.accounts?.length || 0} accounts`);
+    console.log('[Terminal] Fetching inbox/account data from Instantly API...');
+    // Only fetch accounts - we don't need campaigns for inbox health
+    const accountsRes = await instantlyService.getAccounts({ limit: 100 });
+    
+    if (accountsRes.error) {
+      throw new Error(accountsRes.error);
+    }
+    
+    accounts = accountsRes.data || [];
+    console.log(`[Terminal] Received ${accounts.length} accounts`);
   } catch (error) {
     console.error('[Terminal] Error fetching inbox data:', error);
     return {
@@ -1585,8 +1587,8 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
     };
   }
   
-  const accounts = accountData.accounts || [];
-  const campaigns = campaignData.activeCampaigns || [];
+  // We don't need campaigns for inbox health check
+  const campaigns: InstantlyCampaign[] = [];
   
   // Process each account with detailed issue detection
   const processedInboxes: ProcessedInbox[] = accounts.map(account => {

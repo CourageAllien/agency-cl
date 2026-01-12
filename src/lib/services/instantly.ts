@@ -56,12 +56,19 @@ interface CampaignSchedule {
 }
 
 // Campaign Analytics (from /campaigns/analytics)
+// Based on Instantly dashboard: https://developer.instantly.ai/
 interface RawCampaignAnalytics {
   campaign_id: string;
   campaign_name: string;
-  sent: number;
-  contacted: number;
-  total_leads?: number;
+  // Core metrics
+  sent: number;                    // Emails sent
+  contacted: number;               // Leads contacted (received at least 1 email)
+  total_leads?: number;            // Total leads in campaign
+  leads_count?: number;            // Alternative field name
+  not_yet_contacted?: number;      // Leads not yet sent any email (from dashboard)
+  in_progress?: number;            // Leads currently in sequence
+  completed?: number;              // Leads that completed sequence
+  // Engagement
   opened: number;
   unique_opened: number;
   replies: number;
@@ -72,6 +79,7 @@ interface RawCampaignAnalytics {
   unsubscribed: number;
   clicks?: number;
   unique_clicks?: number;
+  // Opportunities
   total_opportunities: number;
   unique_opportunities?: number;
 }
@@ -1025,24 +1033,36 @@ class InstantlyService {
       }
       
       // Map actual API field names to our expected names
-      // API V2 uses: emails_sent_count, reply_count_unique, leads_count, contacted_count
+      // API V2 fields from https://developer.instantly.ai/
       const sent = (raw.emails_sent_count || raw.sent || 0) as number;
       const uniqueReplies = (raw.reply_count_unique || raw.unique_replies || raw.replies || 0) as number;
       const uniqueOpened = (raw.open_count_unique || raw.unique_opened || raw.opened || 0) as number;
       const bounced = (raw.bounced_count || raw.bounced || 0) as number;
       const totalLeads = (raw.leads_count || raw.total_leads || raw.lead_count || 0) as number;
-      const contacted = (raw.contacted_count || raw.contacted || raw.sequence_completed_count || 0) as number;
+      const contacted = (raw.contacted_count || raw.contacted || 0) as number;
+      const completed = (raw.completed_count || raw.completed || raw.sequence_completed_count || 0) as number;
+      const inProgress = (raw.in_progress_count || raw.in_progress || 0) as number;
       const unsubscribed = (raw.unsubscribed_count || raw.unsubscribed || 0) as number;
       const totalInterested = (overview?.total_interested || 0) as number;
       const totalMeetingBooked = (overview?.total_meeting_booked || 0) as number;
       const totalOpportunities = (raw.total_opportunities || overview?.total_opportunities || 0) as number;
       
-      // Calculate uncontacted correctly: total leads minus contacted
-      const uncontacted = Math.max(0, totalLeads - contacted);
+      // "Not yet contacted" - leads that haven't received any email yet
+      // This is a SEPARATE field from the API, not calculated!
+      // If API provides it directly, use it. Otherwise calculate from total - contacted
+      const notYetContacted = (raw.not_yet_contacted || raw.not_contacted || raw.pending || 0) as number;
       
-      // Debug log for calculation
-      if (raw.campaign_name?.includes('Consumer Optix')) {
-        console.log(`[DEBUG] "${raw.campaign_name}" calculation: totalLeads=${totalLeads}, contacted=${contacted}, uncontacted=${uncontacted}`);
+      // Final uncontacted: prefer API field, fallback to calculation
+      const uncontacted = notYetContacted > 0 
+        ? notYetContacted 
+        : Math.max(0, totalLeads - contacted);
+      
+      // Debug log for first few campaigns
+      if (rawAnalytics.indexOf(raw) < 3) {
+        console.log(`[DEBUG] Campaign "${raw.campaign_name}":`, {
+          totalLeads, contacted, completed, inProgress, notYetContacted, uncontacted,
+          rawFields: Object.keys(raw).filter(k => k.includes('contact') || k.includes('lead') || k.includes('progress'))
+        });
       }
 
       const replyRate = sent > 0 ? (uniqueReplies / sent) * 100 : 0;

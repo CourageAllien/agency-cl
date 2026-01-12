@@ -197,6 +197,16 @@ function formatCommandResponse(result: {
   
   // Sections
   for (const section of result.sections) {
+    // Check if this is a "full text" section (campaigns command uses this)
+    // It has one item with name "Full Analysis" and the full text in details[0]
+    if (section.items?.length === 1 && 
+        section.items[0].name === 'Full Analysis' && 
+        section.items[0].details.length === 1) {
+      // Just output the raw formatted text
+      lines.push(section.items[0].details[0]);
+      continue;
+    }
+    
     if (section.type === 'status' && section.status) {
       lines.push(`**${section.title}**`);
       lines.push(`${section.status.label}: ${section.status.value} ${section.status.icon}`);

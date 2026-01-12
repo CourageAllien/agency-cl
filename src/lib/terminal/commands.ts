@@ -412,146 +412,149 @@ async function handleCampaignListCommand(forceRefresh: boolean): Promise<Termina
   // Generate summary
   const summary = generateCampaignSummary(sorted);
   
-  // Build response sections
-  const sections: TerminalSection[] = [];
+  // Build detailed campaign list as formatted text
+  const campaignDetails = sorted.map((c, idx) => {
+    // Determine status icon
+    const statusIcon = c.urgency === 'URGENT' ? '🔴' : 
+                       c.urgency === 'HIGH' ? '⚠️' : 
+                       c.classification === 'NO ACTION' ? '✅' : '🟡';
+    
+    // Determine reply rate icon
+    const replyIcon = c.replyRate >= 2.0 ? '⭐ EXCELLENT' : 
+                      c.replyRate >= BENCHMARKS.MIN_REPLY_RATE ? '✅ Good' : 
+                      '🔴 Below benchmark';
+    
+    // Determine leads status
+    const leadsIcon = c.uncontacted < BENCHMARKS.LOW_LEADS_CRITICAL ? '🔴 CRITICAL' :
+                      c.uncontacted < BENCHMARKS.LOW_LEADS_WARNING ? '⚠️ LOW' : '✅';
+    
+    // Check for broken subsequences
+    const subsequencesBroken = c.positiveReplies > 10 && c.meetings === 0;
+    
+    // Build campaign card
+    let card = `**${idx + 1}. ${c.name}**\n`;
+    card += `Status: Active ${statusIcon}\n`;
+    card += `Leads: ${c.uncontacted.toLocaleString()} uncontacted ${leadsIcon}\n\n`;
+    
+    card += `**Performance:**\n`;
+    card += `• Sent: ${c.sent.toLocaleString()}\n`;
+    card += `• Reply Rate: ${c.replyRate.toFixed(2)}% ${replyIcon}\n`;
+    card += `• Opportunities: ${c.opportunities}${c.opportunities === 0 && c.replies > 100 ? ' 🔴' : ''}\n`;
+    card += `• Reply to Opp: ${c.replyToOpp.toFixed(2)}%\n`;
+    
+    // Show conversion if we have positive replies
+    if (c.positiveReplies > 0) {
+      card += `\n**Conversion:**\n`;
+      card += `• ${c.positiveReplies} positive replies → ${c.meetings} meetings\n`;
+      card += `• Pos Reply to Meeting: ${c.posReplyToMeeting.toFixed(2)}%${c.posReplyToMeeting < BENCHMARKS.TARGET_CONVERSION ? ' ⚠️' : ' ✅'}\n`;
+    }
+    
+    // Analysis for broken subsequences
+    if (subsequencesBroken) {
+      card += `\n**⚠️ Analysis:**\n`;
+      card += `• ${c.positiveReplies} replies → ZERO meetings = SUBSEQUENCES BROKEN\n`;
+      card += `• Fix price/info/meeting templates urgently\n`;
+    }
+    
+    // Classification
+    const classIcon = c.classification === 'NEED NEW LIST' ? '🔴' :
+                      c.classification === 'NOT PRIORITY' ? '🚫' :
+                      c.classification === 'REVIEW' ? '⚠️' :
+                      c.classification === 'NO ACTION' ? '✅' : '⏳';
+    
+    card += `\n**Classification: ${classIcon} ${c.classification}**${c.urgency === 'URGENT' ? ' (URGENT)' : ''}\n`;
+    card += `Reason: ${c.reason}\n`;
+    card += `Action: ${c.action}`;
+    
+    return card;
+  }).join('\n\n───────────────────────────────────────\n\n');
   
-  // Urgent items first
+  // Build summary section
+  let summaryText = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+  summaryText += '**SUMMARY BY CLASSIFICATION:**\n';
+  summaryText += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+  
+  // Urgent
   if (summary.urgent.length > 0) {
-    sections.push({
-      title: '🔴 URGENT - Immediate Action Required',
-      type: 'list',
-      count: summary.urgent.length,
-      items: summary.urgent.map(item => ({
-        name: item.name,
-        details: [item.issue, `Action: ${item.action}`],
-        priority: 'URGENT'
-      }))
+    summaryText += '🔴 **URGENT - Immediate Action Required:**\n';
+    summary.urgent.forEach(u => {
+      summaryText += `• ${u.name} (${u.issue.split(' - ')[0]})\n`;
     });
+    summaryText += '\n';
   }
   
   // Need new list
   if (summary.byClassification['NEED NEW LIST'].length > 0) {
-    const needListCampaigns = sorted.filter(c => c.classification === 'NEED NEW LIST');
-    sections.push({
-      title: '⚠️ NEED NEW LIST (<3000 leads)',
-      type: 'list',
-      count: needListCampaigns.length,
-      items: needListCampaigns.map(c => ({
-        name: c.name,
-        details: [
-          `${c.uncontacted.toLocaleString()} leads remaining`,
-          `Reply Rate: ${c.replyRate.toFixed(2)}%`,
-          `Action: ${c.action}`
-        ],
-        priority: c.urgency
-      }))
+    summaryText += '⚠️ **NEED NEW LIST (<3000 leads):**\n';
+    sorted.filter(c => c.classification === 'NEED NEW LIST').forEach(c => {
+      summaryText += `• ${c.name} (${c.uncontacted.toLocaleString()} left)\n`;
     });
+    summaryText += '\n';
   }
   
-  // Review (subsequence issues)
+  // Review
   if (summary.byClassification['REVIEW'].length > 0) {
-    const reviewCampaigns = sorted.filter(c => c.classification === 'REVIEW');
-    sections.push({
-      title: '⚠️ REVIEW - Fix Subsequences',
-      type: 'list',
-      count: reviewCampaigns.length,
-      items: reviewCampaigns.map(c => ({
-        name: c.name,
-        details: [
-          `${c.positiveReplies} positive replies → ${c.meetings} meetings (${c.posReplyToMeeting.toFixed(1)}%)`,
-          `Target: 40% conversion`,
-          `Action: ${c.action}`
-        ],
-        priority: c.urgency
-      }))
+    summaryText += '⚠️ **REVIEW - Fix Subsequences:**\n';
+    sorted.filter(c => c.classification === 'REVIEW').forEach(c => {
+      summaryText += `• ${c.name} (${c.posReplyToMeeting.toFixed(2)}% conversion)\n`;
     });
+    summaryText += '\n';
   }
   
   // Not priority
   if (summary.byClassification['NOT PRIORITY'].length > 0) {
-    const notPriorityCampaigns = sorted.filter(c => c.classification === 'NOT PRIORITY');
-    sections.push({
-      title: '🚫 NOT PRIORITY - Not Viable',
-      type: 'list',
-      count: notPriorityCampaigns.length,
-      items: notPriorityCampaigns.map(c => ({
-        name: c.name,
-        details: [
-          c.reason,
-          `Action: ${c.action}`
-        ],
-        priority: 'HIGH'
-      }))
+    summaryText += '🚫 **NOT PRIORITY - Not Viable:**\n';
+    sorted.filter(c => c.classification === 'NOT PRIORITY').forEach(c => {
+      const shortReason = c.replyRate < BENCHMARKS.MIN_REPLY_RATE 
+        ? `${c.replyRate.toFixed(2)}% reply rate`
+        : `${c.contacted.toLocaleString()} sent, ${c.opportunities} opps`;
+      summaryText += `• ${c.name} (${shortReason})\n`;
     });
+    summaryText += '\n';
   }
   
-  // No action (performing well)
+  // Performing well
   if (summary.byClassification['NO ACTION'].length > 0) {
-    const noActionCampaigns = sorted.filter(c => c.classification === 'NO ACTION');
-    sections.push({
-      title: '✅ NO ACTION - Performing Well',
-      type: 'list',
-      count: noActionCampaigns.length,
-      items: noActionCampaigns.map(c => ({
-        name: c.name,
-        details: [
-          `Reply Rate: ${c.replyRate.toFixed(2)}%`,
-          `${c.uncontacted.toLocaleString()} leads remaining`,
-          `Opportunities: ${c.opportunities}`
-        ],
-        priority: 'LOW'
-      }))
+    summaryText += '✅ **NO ACTION - Performing Well:**\n';
+    sorted.filter(c => c.classification === 'NO ACTION').forEach(c => {
+      summaryText += `• ${c.name} (${c.uncontacted.toLocaleString()} leads, ${c.posReplyToMeeting.toFixed(2)}% conv)\n`;
     });
+    summaryText += '\n';
   }
   
   // Pending
   if (summary.byClassification['PENDING'].length > 0) {
-    const pendingCampaigns = sorted.filter(c => c.classification === 'PENDING');
-    sections.push({
-      title: '⏳ PENDING - Awaiting Data',
-      type: 'list',
-      count: pendingCampaigns.length,
-      items: pendingCampaigns.map(c => ({
-        name: c.name,
-        details: [
-          `${c.sent.toLocaleString()} sent (need 10k for classification)`,
-          'Continue running to gather data'
-        ],
-        priority: 'LOW'
-      }))
+    summaryText += '⏳ **PENDING - Awaiting Data:**\n';
+    sorted.filter(c => c.classification === 'PENDING').forEach(c => {
+      summaryText += `• ${c.name} (${c.sent.toLocaleString()} sent)\n`;
     });
+    summaryText += '\n';
   }
   
-  // Benchmark summary
-  sections.push({
-    title: '📊 BENCHMARK STATUS',
-    type: 'summary',
-    status: {
-      label: 'Campaign Health',
-      value: `${summary.byClassification['NO ACTION'].length}/${summary.total} performing well`,
-      icon: summary.byClassification['NO ACTION'].length >= summary.total / 2 ? '✅' : '⚠️'
-    }
-  });
+  // Benchmark status
+  summaryText += '**BENCHMARK STATUS:**\n';
+  summaryText += `• Below ${BENCHMARKS.MIN_REPLY_RATE}% reply rate: ${summary.belowBenchmarks.replyRate.length} campaign(s)\n`;
+  summaryText += `• Below ${BENCHMARKS.TARGET_CONVERSION}% pos reply→meeting: ${summary.belowBenchmarks.conversion.length} campaign(s)\n`;
+  summaryText += `• Contacted 20k+ with ≤2 opps: ${summary.belowBenchmarks.viability.length} campaign(s)`;
   
+  // Combine into full response
+  const fullResponse = campaignDetails + summaryText;
+  
+  // Create response with the detailed text
   const response: TerminalResponse = {
     type: 'success',
     command: 'campaigns',
     title: `Active Campaign Analysis (${activeCampaigns.length} campaigns)`,
     icon: '📊',
-    sections,
-    summary: [
-      `**${summary.total}** active campaigns analyzed`,
-      `---`,
-      `🔴 Need New List: ${summary.byClassification['NEED NEW LIST'].length}`,
-      `⚠️ Review (fix subsequences): ${summary.byClassification['REVIEW'].length}`,
-      `🚫 Not Priority: ${summary.byClassification['NOT PRIORITY'].length}`,
-      `✅ Performing Well: ${summary.byClassification['NO ACTION'].length}`,
-      `⏳ Pending: ${summary.byClassification['PENDING'].length}`,
-      `---`,
-      `Below ${BENCHMARKS.MIN_REPLY_RATE}% reply rate: ${summary.belowBenchmarks.replyRate.length}`,
-      `Below ${BENCHMARKS.TARGET_CONVERSION}% conversion: ${summary.belowBenchmarks.conversion.length}`,
-      `20k+ contacted with ≤2 opps: ${summary.belowBenchmarks.viability.length}`
-    ],
+    sections: [{
+      title: 'CAMPAIGN DETAILS',
+      type: 'summary',
+      items: [{
+        name: 'Full Analysis',
+        details: [fullResponse]
+      }]
+    }],
+    summary: [],
     metadata: {
       timestamp: 'just now',
       cached: false,

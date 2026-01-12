@@ -406,7 +406,7 @@ class InstantlyService {
    */
   private async fetchAllPages<T>(
     fetchPage: (cursor?: string) => Promise<InstantlyApiResponse<unknown>>,
-    maxPages: number = 5 // Limit to 5 pages (500 items max) for speed
+    maxPages: number = 50 // Increased to 50 pages (5000 items max) to get all data
   ): Promise<{ data: T[]; error?: string }> {
     const allItems: T[] = [];
     let cursor: string | undefined;
@@ -973,25 +973,26 @@ class InstantlyService {
   }> {
     console.log('[Instantly API v2] Fetching data (FAST mode)...');
 
-    // Fetch all in parallel - first page only (100 items each)
+    // Fetch ALL campaigns and accounts using pagination
+    // Use getAllCampaigns for full pagination, others for first page
     const [
-      campaignsRes,
-      accountsRes,
+      allCampaignsRes,
+      allAccountsRes,
       tagsRes,
       tagMappingsRes,
       analyticsRes,
       analyticsOverviewRes,
     ] = await Promise.all([
-      this.getCampaigns({ limit: 100 }),
-      this.getAccounts({ limit: 100 }),
+      this.getAllCampaigns(), // Gets ALL campaigns with pagination
+      this.getAllAccounts(),  // Gets ALL accounts with pagination
       this.getCustomTags(),
       this.getCustomTagMappings({}),
       this.getCampaignAnalytics({ exclude_total_leads_count: false }),
       this.getCampaignAnalyticsOverview({ expand_crm_events: false }),
     ]);
 
-    const allCampaigns = campaignsRes.data || [];
-    const accounts = accountsRes.data || [];
+    const allCampaigns = allCampaignsRes.data || [];
+    const accounts = allAccountsRes.data || [];
     const tags = tagsRes.data || [];
     const tagMappings = tagMappingsRes.data || [];
 
@@ -1093,8 +1094,8 @@ class InstantlyService {
     console.log(`[Instantly API v2] Skipping warmup analytics for ${accounts.length} accounts (using warmup_score instead)`);
 
     const errors = [
-      campaignsRes.error,
-      accountsRes.error,
+      allCampaignsRes.error,
+      allAccountsRes.error,
       tagsRes.error,
       tagMappingsRes.error,
       analyticsRes.error,

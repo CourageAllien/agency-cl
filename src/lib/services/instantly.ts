@@ -203,6 +203,7 @@ export interface InstantlyCampaignAnalytics {
   campaign_name: string;
   sent: number;
   contacted: number;
+  uncontacted: number; // Calculated: total_leads - contacted
   total_leads: number;
   unique_opened: number;
   unique_replies: number;
@@ -1010,22 +1011,39 @@ class InstantlyService {
     const tagMap = new Map(tags.map(t => [t.id, t.name]));
 
     // Merge analytics with overview data
-    // Note: API returns different field names than expected
+    // API V2 field names: https://developer.instantly.ai/
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const analytics: InstantlyCampaignAnalytics[] = rawAnalytics.map((raw: any) => {
       const overview = overviewMap.get(raw.campaign_id as string);
       
+      // Debug: Log first campaign's raw data to see actual field names
+      if (raw.campaign_name?.includes('Consumer Optix') || rawAnalytics.indexOf(raw) === 0) {
+        console.log(`[DEBUG] Raw analytics for "${raw.campaign_name}":`, JSON.stringify(raw, null, 2));
+        if (overview) {
+          console.log(`[DEBUG] Overview for "${raw.campaign_name}":`, JSON.stringify(overview, null, 2));
+        }
+      }
+      
       // Map actual API field names to our expected names
+      // API V2 uses: emails_sent_count, reply_count_unique, leads_count, contacted_count
       const sent = (raw.emails_sent_count || raw.sent || 0) as number;
-      const uniqueReplies = (raw.reply_count_unique || raw.unique_replies || 0) as number;
-      const uniqueOpened = (raw.open_count_unique || raw.unique_opened || 0) as number;
+      const uniqueReplies = (raw.reply_count_unique || raw.unique_replies || raw.replies || 0) as number;
+      const uniqueOpened = (raw.open_count_unique || raw.unique_opened || raw.opened || 0) as number;
       const bounced = (raw.bounced_count || raw.bounced || 0) as number;
-      const totalLeads = (raw.leads_count || raw.total_leads || 0) as number;
-      const contacted = (raw.contacted_count || raw.contacted || 0) as number;
+      const totalLeads = (raw.leads_count || raw.total_leads || raw.lead_count || 0) as number;
+      const contacted = (raw.contacted_count || raw.contacted || raw.sequence_completed_count || 0) as number;
       const unsubscribed = (raw.unsubscribed_count || raw.unsubscribed || 0) as number;
       const totalInterested = (overview?.total_interested || 0) as number;
       const totalMeetingBooked = (overview?.total_meeting_booked || 0) as number;
-      const totalOpportunities = (raw.total_opportunities || 0) as number;
+      const totalOpportunities = (raw.total_opportunities || overview?.total_opportunities || 0) as number;
+      
+      // Calculate uncontacted correctly: total leads minus contacted
+      const uncontacted = Math.max(0, totalLeads - contacted);
+      
+      // Debug log for calculation
+      if (raw.campaign_name?.includes('Consumer Optix')) {
+        console.log(`[DEBUG] "${raw.campaign_name}" calculation: totalLeads=${totalLeads}, contacted=${contacted}, uncontacted=${uncontacted}`);
+      }
 
       const replyRate = sent > 0 ? (uniqueReplies / sent) * 100 : 0;
       const conversionRate = uniqueReplies > 0 ? (totalOpportunities / uniqueReplies) * 100 : 0;
@@ -1037,6 +1055,7 @@ class InstantlyService {
         campaign_name: raw.campaign_name as string,
         sent,
         contacted,
+        uncontacted, // NEW: Pre-calculated uncontacted leads
         total_leads: totalLeads,
         unique_opened: uniqueOpened,
         unique_replies: uniqueReplies,

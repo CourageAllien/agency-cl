@@ -381,16 +381,24 @@ async function handleCampaignListCommand(forceRefresh: boolean): Promise<Termina
       };
     }
     
-    // Calculate metrics
+    // Get metrics directly from analytics (already calculated in instantly.ts)
     const sent = analytics.sent || 0;
-    const contacted = analytics.contacted_count || analytics.contacted || 0;
-    const totalLeads = analytics.leads_count || analytics.total_leads || 0;
-    const uncontacted = totalLeads - contacted;
+    const contacted = analytics.contacted || analytics.contacted_count || 0;
+    const totalLeads = analytics.total_leads || analytics.leads_count || 0;
+    // Use pre-calculated uncontacted from API, fallback to calculation
+    const uncontacted = analytics.uncontacted ?? Math.max(0, totalLeads - contacted);
     const replies = analytics.unique_replies || 0;
     const opportunities = analytics.total_opportunities || 0;
     const bounced = analytics.bounced || 0;
     const positiveReplies = analytics.total_interested || 0;
     const meetings = analytics.total_meeting_booked || 0;
+    
+    // Debug log for specific campaign
+    if (campaign.name.includes('Consumer Optix')) {
+      console.log(`[DEBUG] Command processing "${campaign.name}":`, {
+        sent, contacted, totalLeads, uncontacted, replies, opportunities
+      });
+    }
     
     const replyRate = sent > 0 ? (replies / sent) * 100 : 0;
     const replyToOpp = replies > 0 ? (opportunities / replies) * 100 : 0;

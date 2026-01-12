@@ -1593,31 +1593,71 @@ class InstantlyService {
   }
 
   /**
-   * Get ALL accounts - specifically for inbox health command
-   * This is slower but necessary to see all inboxes
+   * Get accounts for inbox health - OPTIMIZED for speed
+   * Fetches up to maxPages of accounts (default 5 = 500 accounts)
+   * This provides a good overview without timing out
    */
-  async getFullAccountsData(): Promise<{
+  async getFullAccountsData(maxPages: number = 5): Promise<{
     accounts: InstantlyAccount[];
     tags: InstantlyCustomTag[];
+    totalFetched: number;
+    hasMore: boolean;
     error?: string;
   }> {
-    console.log('[Instantly API v2] Fetching ALL accounts for inbox health...');
+    console.log(`[Instantly API v2] Fetching accounts for inbox health (max ${maxPages} pages)...`);
     
-    const [allAccountsRes, tagsRes] = await Promise.all([
-      this.getAllAccounts(),
-      this.getCustomTags(),
-    ]);
+    // Fetch accounts with limited pagination for speed
+    const allAccounts: InstantlyAccount[] = [];
+    let cursor: string | undefined;
+    let pageCount = 0;
+    let hasMore = false;
+
+    while (pageCount < maxPages) {
+      const response = await this.getAccounts({ 
+        limit: 100,
+        starting_after: cursor,
+      });
+      
+      if (response.error) {
+        return { 
+          accounts: allAccounts, 
+          tags: [], 
+          totalFetched: allAccounts.length,
+          hasMore: false,
+          error: response.error 
+        };
+      }
+
+      const accounts = response.data || [];
+      allAccounts.push(...accounts);
+      
+      cursor = response.nextStartingAfter;
+      pageCount++;
+
+      console.log(`[Instantly API v2] Accounts page ${pageCount}: ${accounts.length} (total: ${allAccounts.length})`);
+
+      if (!cursor || accounts.length === 0) {
+        break;
+      }
+      
+      // Check if there's more
+      if (pageCount >= maxPages && cursor) {
+        hasMore = true;
+        break;
+      }
+    }
     
-    const accounts = allAccountsRes.data || [];
+    // Fetch tags in parallel (fast)
+    const tagsRes = await this.getCustomTags();
     const tags = tagsRes.data || [];
     
-    console.log(`[Instantly API v2] Total accounts: ${accounts.length}, Tags: ${tags.length}`);
+    console.log(`[Instantly API v2] Fetched ${allAccounts.length} accounts, ${tags.length} tags, hasMore: ${hasMore}`);
     
     // Create tag lookup
     const tagMap = new Map(tags.map(t => [t.id, t.name]));
     
     // Enrich accounts with tags
-    const enrichedAccounts = accounts.map(account => ({
+    const enrichedAccounts = allAccounts.map(account => ({
       ...account,
       tags: (account as any).tag_ids?.map((id: string) => tagMap.get(id)).filter(Boolean) || [],
     }));
@@ -1625,8 +1665,19 @@ class InstantlyService {
     return {
       accounts: enrichedAccounts,
       tags,
-      error: allAccountsRes.error || tagsRes.error,
+      totalFetched: allAccounts.length,
+      hasMore,
+      error: tagsRes.error,
     };
+  }
+
+  /**
+   * Get ALL accounts (full pagination) - use sparingly as it can be slow
+   * Only for cases where you absolutely need every account
+   */
+  async getAllAccountsFull(): Promise<{ data: InstantlyAccount[]; error?: string }> {
+    console.log('[Instantly API v2] Fetching ALL accounts (full pagination)...');
+    return this.getAllAccounts();
   }
 }
 

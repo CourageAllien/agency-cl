@@ -1779,17 +1779,22 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
   }
   
   let accounts: InstantlyAccount[] = [];
+  let hasMoreAccounts = false;
+  let totalFetched = 0;
+  
   try {
-    console.log('[Terminal] Fetching ALL inbox/account data from Instantly API...');
-    // Fetch ALL accounts using pagination - for full inbox health check
-    const accountsData = await instantlyService.getFullAccountsData();
+    console.log('[Terminal] Fetching inbox/account data from Instantly API...');
+    // Fetch accounts with optimized pagination (5 pages = 500 accounts max for speed)
+    const accountsData = await instantlyService.getFullAccountsData(5);
     
     if (accountsData.error) {
       throw new Error(accountsData.error);
     }
     
     accounts = accountsData.accounts || [];
-    console.log(`[Terminal] Received ${accounts.length} total accounts`);
+    hasMoreAccounts = accountsData.hasMore || false;
+    totalFetched = accountsData.totalFetched || accounts.length;
+    console.log(`[Terminal] Received ${accounts.length} accounts (hasMore: ${hasMoreAccounts})`);
   } catch (error) {
     console.error('[Terminal] Error fetching inbox data:', error);
     return {
@@ -1949,8 +1954,9 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
   const healthIcon = parseFloat(stats.healthPercentage) >= 90 ? '✅' : 
                      parseFloat(stats.healthPercentage) >= 70 ? '⚠️' : '🔴';
   fullResponse += `┌─────────────────────────────────────────────────────────┐\n`;
-  fullResponse += `│ Total: ${stats.total}    Healthy: ${stats.healthy} ✅    Issues: ${stats.withIssues} ⚠️\n`;
-  fullResponse += `│ Health: ${stats.healthPercentage}% ${healthIcon}          Lost Capacity: ${stats.totalLostCapacity} sends/day\n`;
+  fullResponse += `│ Checked: ${stats.total} inboxes${hasMoreAccounts ? ' (more available)' : ''}\n`;
+  fullResponse += `│ Healthy: ${stats.healthy} ✅    Issues: ${stats.withIssues} ⚠️\n`;
+  fullResponse += `│ Health: ${stats.healthPercentage}% ${healthIcon}    Lost Capacity: ${stats.totalLostCapacity}/day\n`;
   fullResponse += `└─────────────────────────────────────────────────────────┘\n\n`;
   
   // Critical Issues
@@ -2310,10 +2316,11 @@ async function handleDailyReportCommand(forceRefresh: boolean): Promise<Terminal
   const todayRange = getDateRange('today');
   const weekRange = getDateRange('week');
   
+  // Use optimized fetch for accounts (5 pages = 500 max)
   const [todayData, weekData, accountsData] = await Promise.all([
     instantlyService.getFullAnalytics(todayRange),
     instantlyService.getFullAnalytics(weekRange),
-    instantlyService.getFullAccountsData(),
+    instantlyService.getFullAccountsData(5),
   ]);
   
   const activeCampaigns = todayData.activeCampaigns || [];
@@ -2640,9 +2647,10 @@ async function handleWeeklyReportCommand(forceRefresh: boolean): Promise<Termina
   }
   
   const weekRange = getDateRange('week');
+  // Use optimized fetch for accounts (5 pages = 500 max)
   const [weekData, accountsData] = await Promise.all([
     instantlyService.getFullAnalytics(weekRange),
-    instantlyService.getFullAccountsData(),
+    instantlyService.getFullAccountsData(5),
   ]);
   
   const activeCampaigns = weekData.activeCampaigns || [];
@@ -2984,13 +2992,11 @@ async function handleBadVariantsCommand(forceRefresh: boolean): Promise<Terminal
 
 // Inbox issues (grouped by tag)
 async function handleInboxIssuesCommand(forceRefresh: boolean): Promise<TerminalResponse> {
-  const [accountsData, tagsRes] = await Promise.all([
-    instantlyService.getFullAccountsData(),
-    instantlyService.getAllCustomTags(),
-  ]);
+  // Use optimized fetch (5 pages = 500 accounts max)
+  const accountsData = await instantlyService.getFullAccountsData(5);
   
   const accounts = accountsData.accounts || [];
-  const tags = tagsRes.data || [];
+  const tags = accountsData.tags || [];
   
   const disconnected = accounts.filter(a => a.statusLabel === 'disconnected' || a.status === -1 || a.status === 0);
   const withErrors = accounts.filter(a => a.has_error);
@@ -3050,7 +3056,8 @@ async function handleInboxIssuesCommand(forceRefresh: boolean): Promise<Terminal
 
 // Warmup status
 async function handleWarmupStatusCommand(forceRefresh: boolean): Promise<TerminalResponse> {
-  const accountsData = await instantlyService.getFullAccountsData();
+  // Use optimized fetch (5 pages = 500 max)
+  const accountsData = await instantlyService.getFullAccountsData(5);
   const accounts = accountsData.accounts || [];
   
   const warmingUp = accounts.filter(a => a.warmup_enabled);
@@ -3149,13 +3156,11 @@ async function handleTagsCommand(forceRefresh: boolean): Promise<TerminalRespons
 
 // Accounts by tag
 async function handleAccountsByTagCommand(tagName: string, forceRefresh: boolean): Promise<TerminalResponse> {
-  const [accountsData, tagsRes] = await Promise.all([
-    instantlyService.getFullAccountsData(),
-    instantlyService.getAllCustomTags(),
-  ]);
+  // Use optimized fetch (5 pages = 500 max)
+  const accountsData = await instantlyService.getFullAccountsData(5);
   
   const accounts = accountsData.accounts || [];
-  const tags = tagsRes.data || [];
+  const tags = accountsData.tags || [];
   
   const tag = tags.find(t => t.name.toLowerCase().includes(tagName.toLowerCase()));
   

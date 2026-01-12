@@ -1014,14 +1014,22 @@ class InstantlyService {
     const tagMap = new Map(tags.map(t => [t.id, t.name]));
 
     // Merge analytics with overview data
-    const analytics: InstantlyCampaignAnalytics[] = rawAnalytics.map(raw => {
-      const overview = overviewMap.get(raw.campaign_id);
+    // Note: API returns different field names than expected
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const analytics: InstantlyCampaignAnalytics[] = rawAnalytics.map((raw: any) => {
+      const overview = overviewMap.get(raw.campaign_id as string);
       
-      const sent = raw.sent || 0;
-      const uniqueReplies = raw.unique_replies || 0;
-      const totalInterested = overview?.total_interested || 0;
-      const totalMeetingBooked = overview?.total_meeting_booked || 0;
-      const totalOpportunities = raw.total_opportunities || 0;
+      // Map actual API field names to our expected names
+      const sent = (raw.emails_sent_count || raw.sent || 0) as number;
+      const uniqueReplies = (raw.reply_count_unique || raw.unique_replies || 0) as number;
+      const uniqueOpened = (raw.open_count_unique || raw.unique_opened || 0) as number;
+      const bounced = (raw.bounced_count || raw.bounced || 0) as number;
+      const totalLeads = (raw.leads_count || raw.total_leads || 0) as number;
+      const contacted = (raw.contacted_count || raw.contacted || 0) as number;
+      const unsubscribed = (raw.unsubscribed_count || raw.unsubscribed || 0) as number;
+      const totalInterested = (overview?.total_interested || 0) as number;
+      const totalMeetingBooked = (overview?.total_meeting_booked || 0) as number;
+      const totalOpportunities = (raw.total_opportunities || 0) as number;
 
       const replyRate = sent > 0 ? (uniqueReplies / sent) * 100 : 0;
       const conversionRate = uniqueReplies > 0 ? (totalOpportunities / uniqueReplies) * 100 : 0;
@@ -1029,33 +1037,33 @@ class InstantlyService {
       const posReplyToMeeting = totalInterested > 0 ? (totalMeetingBooked / totalInterested) * 100 : 0;
 
       return {
-        campaign_id: raw.campaign_id,
-        campaign_name: raw.campaign_name,
+        campaign_id: raw.campaign_id as string,
+        campaign_name: raw.campaign_name as string,
         sent,
-        contacted: raw.contacted || 0,
-        total_leads: raw.total_leads || 0,
-        unique_opened: raw.unique_opened || 0,
+        contacted,
+        total_leads: totalLeads,
+        unique_opened: uniqueOpened,
         unique_replies: uniqueReplies,
-        bounced: raw.bounced || 0,
-        unsubscribed: raw.unsubscribed || 0,
+        bounced,
+        unsubscribed,
         total_opportunities: totalOpportunities,
         total_interested: totalInterested,
         total_meeting_booked: totalMeetingBooked,
-        total_meeting_completed: overview?.total_meeting_completed || 0,
-        total_closed: overview?.total_closed || 0,
+        total_meeting_completed: (overview?.total_meeting_completed || 0) as number,
+        total_closed: (overview?.total_closed || 0) as number,
         reply_rate: Number(replyRate.toFixed(2)),
         conversion_rate: Number(conversionRate.toFixed(2)),
         positive_reply_rate: Number(positiveReplyRate.toFixed(2)),
         pos_reply_to_meeting: Number(posReplyToMeeting.toFixed(2)),
-        // Legacy fields
+        // Legacy fields for compatibility
         total_sent: sent,
-        total_opened: raw.unique_opened || 0,
+        total_opened: uniqueOpened,
         total_replied: uniqueReplies,
-        total_bounced: raw.bounced || 0,
-        total_unsubscribed: raw.unsubscribed || 0,
-        leads_count: raw.total_leads || 0,
-        contacted_count: raw.contacted || 0,
-        completed_count: 0,
+        total_bounced: bounced,
+        total_unsubscribed: unsubscribed,
+        leads_count: totalLeads,
+        contacted_count: contacted,
+        completed_count: (raw.completed_count || 0) as number,
       };
     });
 

@@ -1665,101 +1665,140 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
     issueTypes
   };
   
-  // Build response sections
-  const sections: TerminalSection[] = [];
-  
-  // Summary stats
-  sections.push({
-    title: 'INBOX HEALTH OVERVIEW',
-    type: 'status',
-    status: {
-      label: 'Health Rate',
-      value: `${stats.healthPercentage}%`,
-      icon: parseFloat(stats.healthPercentage) >= 90 ? '✅' : parseFloat(stats.healthPercentage) >= 70 ? '⚠️' : '🔴',
-      change: `${stats.healthy}/${stats.total} healthy`
+  // Build detailed text response
+  const formatInboxCard = (inbox: ProcessedInbox, idx: number): string => {
+    let card = `**${idx}. ${inbox.email}**\n`;
+    card += `Status: ${inbox.status === 'disconnected' ? 'Disconnected' : inbox.status === 'warmup' ? 'Warmup' : 'Active'}\n`;
+    card += `Severity: ${inbox.severity}\n\n`;
+    
+    // Issues
+    if (inbox.issues.length > 0) {
+      card += `**Issues:**\n`;
+      inbox.issues.forEach(issue => {
+        card += `${issue.icon} ${issue.message}\n`;
+        if (issue.details) {
+          card += `   _Details: ${issue.details}_\n`;
+        }
+      });
+      card += '\n';
     }
-  });
+    
+    // Health metrics (if available)
+    if (inbox.healthScore !== null && inbox.healthScore > 0) {
+      card += `**Health Metrics:**\n`;
+      card += `Score: ${inbox.healthScore}`;
+      if (inbox.landedInbox !== null) {
+        card += `    Inbox: ${inbox.landedInbox}%    Spam: ${inbox.landedSpam}%`;
+      }
+      card += '\n\n';
+    }
+    
+    // Impact
+    card += `**Impact:**\n`;
+    card += `• Lost capacity: ~${inbox.lostCapacity} sends/day\n`;
+    if (inbox.daysSinceLastUsed !== null && inbox.daysSinceLastUsed > 0) {
+      card += `• Not used for ${inbox.daysSinceLastUsed} days\n`;
+    }
+    card += '\n';
+    
+    // Actions
+    if (inbox.actions.length > 0) {
+      card += `**Actions to Take:**\n`;
+      inbox.actions.forEach(action => {
+        card += `▸ ${action.label} [${action.priority}]\n`;
+        action.steps.forEach((step, i) => {
+          card += `  ${i + 1}. ${step}\n`;
+        });
+      });
+    }
+    
+    return card;
+  };
   
-  // Critical issues
+  // Build full response text
+  let fullResponse = '';
+  
+  // Summary box
+  const healthIcon = parseFloat(stats.healthPercentage) >= 90 ? '✅' : 
+                     parseFloat(stats.healthPercentage) >= 70 ? '⚠️' : '🔴';
+  fullResponse += `┌─────────────────────────────────────────────────────────┐\n`;
+  fullResponse += `│ Total: ${stats.total}    Healthy: ${stats.healthy} ✅    Issues: ${stats.withIssues} ⚠️\n`;
+  fullResponse += `│ Health: ${stats.healthPercentage}% ${healthIcon}          Lost Capacity: ${stats.totalLostCapacity} sends/day\n`;
+  fullResponse += `└─────────────────────────────────────────────────────────┘\n\n`;
+  
+  // Critical Issues
   if (categorized.critical.length > 0) {
-    sections.push({
-      title: '🔴 CRITICAL ISSUES',
-      type: 'list',
-      count: categorized.critical.length,
-      items: categorized.critical.slice(0, 10).map(inbox => ({
-        name: inbox.email,
-        details: [
-          ...inbox.issues.map(i => `${i.icon} ${i.message}`),
-          inbox.issues[0]?.details ? `Details: ${inbox.issues[0].details}` : '',
-          `Lost: ~${inbox.lostCapacity} sends/day`,
-          inbox.actions[0] ? `Action: ${inbox.actions[0].label}` : ''
-        ].filter(Boolean),
-        priority: 'CRITICAL' as const
-      }))
+    fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    fullResponse += `**🔴 CRITICAL ISSUES (${categorized.critical.length})**\n`;
+    fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    categorized.critical.forEach((inbox, idx) => {
+      fullResponse += formatInboxCard(inbox, idx + 1);
+      fullResponse += '\n────────────────────────────────────────────────────────────\n\n';
     });
   }
   
-  // High priority
+  // High Priority
   if (categorized.high.length > 0) {
-    sections.push({
-      title: '⚠️ HIGH PRIORITY',
-      type: 'list',
-      count: categorized.high.length,
-      items: categorized.high.slice(0, 10).map(inbox => ({
-        name: inbox.email,
-        details: [
-          ...inbox.issues.map(i => `${i.icon} ${i.message}`),
-          inbox.healthScore ? `Health Score: ${inbox.healthScore}` : '',
-          inbox.landedInbox ? `Inbox: ${inbox.landedInbox}% | Spam: ${inbox.landedSpam}%` : '',
-          inbox.actions[0] ? `Action: ${inbox.actions[0].label}` : ''
-        ].filter(Boolean),
-        priority: 'HIGH' as const
-      }))
+    fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    fullResponse += `**⚠️ HIGH PRIORITY (${categorized.high.length})**\n`;
+    fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    categorized.high.forEach((inbox, idx) => {
+      fullResponse += formatInboxCard(inbox, idx + 1);
+      fullResponse += '\n────────────────────────────────────────────────────────────\n\n';
     });
   }
   
-  // Medium priority
+  // Medium Priority
   if (categorized.medium.length > 0) {
-    sections.push({
-      title: '🟡 MEDIUM PRIORITY',
-      type: 'list',
-      count: categorized.medium.length,
-      items: categorized.medium.slice(0, 5).map(inbox => ({
-        name: inbox.email,
-        details: [
-          ...inbox.issues.map(i => `${i.icon} ${i.message}`),
-          inbox.actions[0] ? `Action: ${inbox.actions[0].label}` : ''
-        ].filter(Boolean),
-        priority: 'MEDIUM' as const
-      }))
+    fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    fullResponse += `**⚠️ MEDIUM PRIORITY (${categorized.medium.length})**\n`;
+    fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    categorized.medium.forEach((inbox, idx) => {
+      fullResponse += formatInboxCard(inbox, idx + 1);
+      fullResponse += '\n────────────────────────────────────────────────────────────\n\n';
     });
   }
   
-  // Healthy summary
-  sections.push({
-    title: '✅ HEALTHY ACCOUNTS',
-    type: 'summary',
-    status: {
-      label: 'Count',
-      value: categorized.healthy.length,
-      icon: '✅'
-    }
-  });
+  // Healthy accounts summary
+  fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  fullResponse += `**✅ HEALTHY ACCOUNTS: ${categorized.healthy.length}**\n`;
+  fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
   
   // Issue breakdown
-  const issueBreakdown = Object.entries(issueTypes)
-    .filter(([, count]) => count > 0)
-    .map(([type, count]) => {
-      const labels: Record<string, string> = {
-        'DISCONNECTED': 'Disconnected',
-        'AUTH_ERROR': 'Auth Errors',
-        'SMTP_ERROR': 'SMTP Errors',
-        'SENDING_ERROR': 'Sending Errors',
-        'LOW_HEALTH': 'Low Health',
-        'WARMUP_DISABLED': 'Warmup Disabled'
-      };
-      return `${labels[type] || type}: ${count}`;
-    });
+  fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  fullResponse += `**📊 Issue Breakdown**\n`;
+  fullResponse += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  
+  const issueLabels: Record<string, string> = {
+    'DISCONNECTED': 'Disconnected',
+    'AUTH_ERROR': 'Authentication Errors',
+    'SMTP_ERROR': 'SMTP Errors',
+    'SENDING_ERROR': 'Sending Errors',
+    'LOW_HEALTH': 'Low Health Scores',
+    'WARMUP_DISABLED': 'Warmup Disabled'
+  };
+  
+  Object.entries(issueTypes).forEach(([type, count]) => {
+    if (count > 0) {
+      fullResponse += `${issueLabels[type] || type}: ${count}\n`;
+    }
+  });
+  
+  fullResponse += `\nEstimated Impact: ${stats.totalLostCapacity} sends/day lost\n`;
+  
+  // Link to full view
+  fullResponse += `\n---\n\n👉 **[View All ${stats.total} Inboxes →](/terminal/inboxes)**\n`;
+  fullResponse += `_Click to see full list with filters_`;
+  
+  // Build response with the detailed text
+  const sections: TerminalSection[] = [{
+    title: 'INBOX HEALTH REPORT',
+    type: 'summary',
+    items: [{
+      name: 'Full Analysis',
+      details: [fullResponse]
+    }]
+  }];
   
   const response: TerminalResponse = {
     type: 'success',
@@ -1767,21 +1806,7 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
     title: 'Inbox Health Report',
     icon: '📧',
     sections,
-    summary: [
-      `**${stats.total}** total inboxes analyzed`,
-      `---`,
-      `🔴 Critical: ${stats.critical}`,
-      `⚠️ High Priority: ${stats.high}`,
-      `🟡 Medium: ${stats.medium}`,
-      `✅ Healthy: ${stats.healthy}`,
-      `---`,
-      `Lost Capacity: ~${stats.totalLostCapacity} emails/day`,
-      ...issueBreakdown,
-      ``,
-      `---`,
-      `👉 **[View All ${stats.total} Inboxes →](/terminal/inboxes)**`,
-      `_Click to see full list with filters and details_`
-    ],
+    summary: [], // Summary is included in the detailed text
     metadata: {
       timestamp: 'just now',
       cached: false,

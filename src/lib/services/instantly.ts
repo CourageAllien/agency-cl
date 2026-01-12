@@ -627,12 +627,40 @@ class InstantlyService {
     const rawAccounts = this.extractArray<RawAccount>(response.data);
     console.log(`[Instantly API v2] Found ${rawAccounts.length} accounts`);
 
+    // Debug: Log first few raw accounts to see actual data structure
+    if (rawAccounts.length > 0) {
+      console.log('[DEBUG] First raw account:', JSON.stringify(rawAccounts[0], null, 2));
+      // Find accounts with errors
+      const errorAccounts = rawAccounts.filter(a => a.status_message || a.status === -1 || a.status === 0);
+      if (errorAccounts.length > 0) {
+        console.log(`[DEBUG] Found ${errorAccounts.length} accounts with potential issues`);
+        console.log('[DEBUG] Sample error account:', JSON.stringify(errorAccounts[0], null, 2));
+      }
+    }
+    
     const accounts: InstantlyAccount[] = rawAccounts.map(raw => {
+      // Determine status label based on various indicators
+      // Status codes: 1 = Active, -1 = Paused/Disconnected, 0 = Unknown
+      const hasError = !!raw.status_message;
+      const isDisconnected = raw.status === -1 || 
+                             (raw.status_message?.code === 'error') ||
+                             (raw.status_message?.e_message?.toLowerCase().includes('disconnect')) ||
+                             (raw.status_message?.e_message?.toLowerCase().includes('failed'));
+      
       let statusLabel: 'connected' | 'disconnected' | 'warmup' = 'connected';
-      if (raw.status === -1 || raw.status === 0 || raw.status_message) {
+      if (isDisconnected || hasError) {
         statusLabel = 'disconnected';
-      } else if (raw.warmup_status === 1) {
+      } else if (raw.warmup_status === 1 && raw.status === 1) {
         statusLabel = 'warmup';
+      }
+      
+      // Extract error message from status_message object
+      let errorMessage = '';
+      if (raw.status_message) {
+        errorMessage = raw.status_message.e_message || 
+                       raw.status_message.response || 
+                       raw.status_message.code || 
+                       'Unknown error';
       }
 
       return {
@@ -652,8 +680,8 @@ class InstantlyService {
         health_score_label: `${raw.stat_warmup_score || 0}%`,
         landed_inbox: 0,
         landed_spam: 0,
-        has_error: !!raw.status_message,
-        error_message: raw.status_message?.e_message,
+        has_error: hasError,
+        error_message: errorMessage || undefined,
         tags: [],
         last_used: raw.timestamp_last_used,
       };

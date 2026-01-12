@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -21,12 +22,16 @@ import {
   Loader2,
   ChevronRight,
   HelpCircle,
-  List,
-  AlertTriangle,
-  CheckCircle2,
-  TrendingDown,
-  Mail,
+  CalendarDays,
+  CalendarClock,
   Zap,
+  RefreshCw,
+  TrendingDown,
+  AlertTriangle,
+  Mail,
+  Target,
+  CheckSquare,
+  Ban,
 } from "lucide-react";
 
 interface Message {
@@ -34,74 +39,84 @@ interface Message {
   type: "user" | "assistant";
   content: string;
   timestamp: Date;
+  command?: string;
+  structured?: unknown;
 }
 
-// Available command queries organized by category
-const COMMAND_QUERIES = {
-  "Client Performance": [
-    "Are there clients that are not hitting their benchmarks?",
-    "Which clients need attention today?",
-    "Show me clients with low reply rates",
-    "Who has the best conversion rate?",
-    "Compare client performance",
-  ],
-  "Conversion & Meetings": [
-    "Are there any clients with sub 40% positive reply to meeting ratio?",
-    "What's the average conversion rate across all clients?",
-  ],
-  "Inbox Health": [
-    "Are there disconnected inboxes, or inboxes with sending errors?",
-    "List all inbox issues by tag",
-    "What's the overall inbox health status?",
-  ],
-  "Trends & Analytics": [
-    "Are reply rates trending downward since last week?",
-    "What's the portfolio health summary?",
-    "Show me weekly trend analysis",
-  ],
-  "Tasks & Actions": [
-    "Please list summary of all tasks done today",
-    "Show tasks due this week",
-    "What are the critical tasks right now?",
-  ],
-  "Volume & Leads": [
-    "Which clients are running low on leads?",
-    "List all deliverability issues",
-    "What's the total send volume this week?",
-  ],
-};
-
-const QUICK_SUGGESTIONS = [
-  "Are there clients not hitting benchmarks?",
-  "Any clients with sub 40% reply-to-meeting?",
-  "Disconnected inboxes or sending errors?",
-  "Are reply rates trending down?",
-  "Summary of tasks done today",
+// Quick command buttons for each category
+const DAILY_COMMANDS = [
+  { command: "daily", label: "Daily Summary", icon: CalendarDays, shortcut: "d" },
+  { command: "send volume", label: "Send Volume", icon: TrendingDown },
+  { command: "low leads", label: "Low Leads", icon: AlertTriangle },
+  { command: "blocked domains", label: "Blocked Domains", icon: Ban },
 ];
+
+const WEEKLY_COMMANDS = [
+  { command: "weekly summary", label: "Weekly Summary", icon: CalendarClock, shortcut: "w" },
+  { command: "benchmarks", label: "Benchmarks", icon: Target },
+  { command: "conversion", label: "Conversion", icon: CheckSquare },
+  { command: "inbox health", label: "Inbox Health", icon: Mail },
+  { command: "reply trends", label: "Reply Trends", icon: TrendingDown },
+];
+
+interface CommandHelpItem {
+  cmd: string;
+  alias?: string;
+  desc: string;
+}
+
+const COMMAND_HELP: Record<string, { commands: CommandHelpItem[] }> = {
+  "Daily Commands": {
+    commands: [
+      { cmd: "daily", alias: "d", desc: "Full daily summary" },
+      { cmd: "send volume", desc: "Check if send volume is low" },
+      { cmd: "low leads", desc: "Campaigns <3000 leads" },
+      { cmd: "blocked domains", desc: "Check MSFT/Proofpoint/Mimecast/Cisco" },
+    ]
+  },
+  "Weekly Commands": {
+    commands: [
+      { cmd: "weekly summary", alias: "w", desc: "Full Wednesday checklist" },
+      { cmd: "benchmarks", desc: "Campaigns not hitting targets" },
+      { cmd: "conversion", desc: "<40% positive reply to meeting" },
+      { cmd: "inbox health", desc: "Disconnected/error inboxes" },
+      { cmd: "reply trends", desc: "Trending downward analysis" },
+      { cmd: "removed inboxes", desc: "Tag removal report" },
+    ]
+  },
+  "Utility": {
+    commands: [
+      { cmd: "refresh [command]", desc: "Force fresh data" },
+      { cmd: "help", desc: "Show all commands" },
+    ]
+  }
+};
 
 export default function TerminalPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
       type: "assistant",
-      content: `🚀 **Welcome to the Agency Command Terminal!**
+      content: `🚀 **Welcome to the Campaign Terminal!**
 
-I'm powered by Claude AI and connected to your Instantly data. I can analyze your campaigns in real-time and provide actionable insights.
+I'm connected to your Instantly data and ready to help with your daily & weekly tasks.
 
-**What I can help with:**
-• 📊 Client performance & benchmarks
-• 📬 Inbox health & deliverability
-• 📈 Reply rates & conversion trends
-• ✅ Tasks & action items
-• 🔍 Deep campaign analysis
+**Quick Start:**
+• Type **d** for daily tasks
+• Type **w** for weekly summary
+• Or click any button below
 
-Click the **?** button to see all available commands, or just ask me anything!`,
+**12 Commands Available:**
+• 4 daily commands (send volume, low leads, blocked domains)
+• 6 weekly commands (benchmarks, conversion, inbox health, trends)
+• Type **help** for the full list`,
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [showCommands, setShowCommands] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [activeTab, setActiveTab] = useState<"daily" | "weekly">("daily");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -111,13 +126,14 @@ Click the **?** button to see all available commands, or just ask me anything!`,
     }
   }, [messages]);
 
-  const handleSubmit = async () => {
-    if (!input.trim() || isLoading) return;
+  const handleSubmit = async (commandOverride?: string) => {
+    const commandToSend = commandOverride || input.trim();
+    if (!commandToSend || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       type: "user",
-      content: input.trim(),
+      content: commandToSend,
       timestamp: new Date(),
     };
 
@@ -126,20 +142,23 @@ Click the **?** button to see all available commands, or just ask me anything!`,
     setIsLoading(true);
 
     try {
-      // Call the Claude API via our terminal endpoint
       const response = await fetch('/api/terminal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userMessage.content }),
+        body: JSON.stringify({ query: commandToSend }),
       });
 
       let assistantContent: string;
+      let command: string | undefined;
+      let structured: unknown;
 
       if (response.ok) {
         const data = await response.json();
         assistantContent = data.response || "I couldn't process that request. Please try again.";
+        command = data.command;
+        structured = data.structured;
       } else {
-        assistantContent = "⚠️ Unable to connect to AI. Please check your API configuration.";
+        assistantContent = "⚠️ Unable to connect to the terminal service. Please try again.";
       }
 
       const assistantMessage: Message = {
@@ -147,6 +166,8 @@ Click the **?** button to see all available commands, or just ask me anything!`,
         type: "assistant",
         content: assistantContent,
         timestamp: new Date(),
+        command,
+        structured,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -171,76 +192,114 @@ Click the **?** button to see all available commands, or just ask me anything!`,
     }
   };
 
-  const handleSuggestion = (suggestion: string) => {
-    setInput(suggestion);
-    inputRef.current?.focus();
+  const handleCommandClick = (command: string) => {
+    handleSubmit(command);
+  };
+
+  const handleRefresh = () => {
+    if (messages.length > 1) {
+      const lastUserMessage = [...messages].reverse().find(m => m.type === "user");
+      if (lastUserMessage) {
+        handleSubmit(`refresh ${lastUserMessage.content}`);
+      }
+    }
+  };
+
+  const formatMessageContent = (content: string) => {
+    // Split by lines and format markdown-like content
+    return content.split('\n').map((line, i) => {
+      // Bold text
+      const formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      // Italic text
+      const withItalic = formatted.replace(/_(.*?)_/g, '<em class="text-muted-foreground">$1</em>');
+      
+      return (
+        <p 
+          key={i} 
+          className={cn(
+            line.startsWith("•") || line.startsWith("   ") ? "ml-2" : "",
+            line.startsWith("---") ? "border-t border-border my-2" : "",
+            line.match(/^\d+\./) ? "mt-2" : ""
+          )}
+          dangerouslySetInnerHTML={{ __html: line.startsWith("---") ? "" : withItalic }}
+        />
+      );
+    });
   };
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col p-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
             <Terminal className="h-6 w-6 text-primary" />
-            Command Terminal
+            Campaign Terminal
           </h1>
-          <p className="text-muted-foreground">
-            AI-powered natural language interface for your campaign data
+          <p className="text-sm text-muted-foreground">
+            12 commands for your daily & weekly campaign tasks
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="gap-1 text-emerald-400 border-emerald-400/50">
             <Zap className="h-3 w-3" />
-            Connected
+            Live
           </Badge>
           <Badge variant="outline" className="gap-1 text-primary border-primary/50">
             <Sparkles className="h-3 w-3" />
-            Claude AI
+            AI Ready
           </Badge>
-          <Dialog open={showCommands} onOpenChange={setShowCommands}>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            onClick={handleRefresh}
+            disabled={isLoading || messages.length <= 1}
+          >
+            <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+          </Button>
+          <Dialog open={showHelp} onOpenChange={setShowHelp}>
             <DialogTrigger asChild>
               <Button variant="outline" size="icon" className="h-8 w-8">
                 <HelpCircle className="h-4 w-4" />
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogContent className="max-w-lg">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <List className="h-5 w-5" />
-                  Available Query Commands
+                  <Terminal className="h-5 w-5" />
+                  Command Reference
                 </DialogTitle>
                 <DialogDescription>
-                  Click on any query to use it in the terminal
+                  All available commands for the Campaign Terminal
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-6 mt-4">
-                {Object.entries(COMMAND_QUERIES).map(([category, queries]) => (
+              <div className="space-y-4 mt-4">
+                {Object.entries(COMMAND_HELP).map(([category, { commands }]) => (
                   <div key={category}>
-                    <h3 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
-                      {category === "Client Performance" && <AlertTriangle className="h-4 w-4 text-yellow-400" />}
-                      {category === "Conversion & Meetings" && <CheckCircle2 className="h-4 w-4 text-green-400" />}
-                      {category === "Inbox Health" && <Mail className="h-4 w-4 text-purple-400" />}
-                      {category === "Trends & Analytics" && <TrendingDown className="h-4 w-4 text-blue-400" />}
-                      {category === "Tasks & Actions" && <List className="h-4 w-4 text-orange-400" />}
-                      {category === "Volume & Leads" && <AlertTriangle className="h-4 w-4 text-red-400" />}
-                      {category}
-                    </h3>
+                    <h3 className="text-sm font-semibold text-foreground mb-2">{category}</h3>
                     <div className="space-y-1">
-                      {queries.map((query) => (
-                        <Button
-                          key={query}
-                          variant="ghost"
-                          className="w-full justify-start text-left text-sm h-auto py-2 px-3"
+                      {commands.map((cmd) => (
+                        <button
+                          key={cmd.cmd}
+                          className="w-full text-left px-3 py-2 rounded-md hover:bg-muted flex items-center justify-between group"
                           onClick={() => {
-                            setInput(query);
-                            setShowCommands(false);
-                            inputRef.current?.focus();
+                            setShowHelp(false);
+                            handleSubmit(cmd.cmd.replace(" [command]", ""));
                           }}
                         >
-                          <ChevronRight className="mr-2 h-3 w-3 flex-shrink-0" />
-                          <span className="text-muted-foreground">{query}</span>
-                        </Button>
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                              {cmd.cmd}
+                            </code>
+                            {cmd.alias && (
+                              <code className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
+                                {cmd.alias}
+                              </code>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground">{cmd.desc}</span>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -248,6 +307,46 @@ Click the **?** button to see all available commands, or just ask me anything!`,
               </div>
             </DialogContent>
           </Dialog>
+        </div>
+      </div>
+
+      {/* Quick Commands */}
+      <div className="mb-4">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "daily" | "weekly")}>
+          <TabsList className="mb-2">
+            <TabsTrigger value="daily" className="gap-1">
+              <CalendarDays className="h-3.5 w-3.5" />
+              Daily
+            </TabsTrigger>
+            <TabsTrigger value="weekly" className="gap-1">
+              <CalendarClock className="h-3.5 w-3.5" />
+              Weekly
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        
+        <div className="flex flex-wrap gap-2">
+          {(activeTab === "daily" ? DAILY_COMMANDS : WEEKLY_COMMANDS).map((cmd) => {
+            const Icon = cmd.icon;
+            return (
+              <Button
+                key={cmd.command}
+                variant="outline"
+                size="sm"
+                onClick={() => handleCommandClick(cmd.command)}
+                disabled={isLoading}
+                className="gap-1.5"
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {cmd.label}
+                {cmd.shortcut && (
+                  <kbd className="ml-1 text-[10px] bg-muted px-1 py-0.5 rounded">
+                    {cmd.shortcut}
+                  </kbd>
+                )}
+              </Button>
+            );
+          })}
         </div>
       </div>
 
@@ -265,22 +364,25 @@ Click the **?** button to see all available commands, or just ask me anything!`,
               >
                 <div
                   className={cn(
-                    "max-w-[80%] rounded-xl px-4 py-3",
+                    "max-w-[85%] rounded-xl px-4 py-3",
                     message.type === "user"
                       ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-foreground"
+                      : "bg-muted/50 border border-border text-foreground"
                   )}
                 >
-                  <div className="whitespace-pre-wrap text-sm">
-                    {message.content.split("\n").map((line, i) => (
-                      <p key={i} className={line.startsWith("•") ? "ml-2" : ""}>
-                        {line.replace(/\*\*(.*?)\*\*/g, "$1")}
-                      </p>
-                    ))}
+                  {message.command && (
+                    <div className="mb-2 flex items-center gap-2">
+                      <Badge variant="outline" className="text-xs">
+                        {message.command}
+                      </Badge>
+                    </div>
+                  )}
+                  <div className="whitespace-pre-wrap text-sm space-y-1">
+                    {formatMessageContent(message.content)}
                   </div>
                   <div
                     className={cn(
-                      "mt-1 text-xs",
+                      "mt-2 text-xs",
                       message.type === "user"
                         ? "text-primary-foreground/70"
                         : "text-muted-foreground"
@@ -296,37 +398,14 @@ Click the **?** button to see all available commands, or just ask me anything!`,
             ))}
             {isLoading && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-xl bg-muted px-4 py-3">
+                <div className="flex items-center gap-2 rounded-xl bg-muted/50 border border-border px-4 py-3">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <span className="text-sm text-muted-foreground">Analyzing...</span>
+                  <span className="text-sm text-muted-foreground">Analyzing campaigns...</span>
                 </div>
               </div>
             )}
           </div>
         </ScrollArea>
-
-        {/* Quick Suggestions */}
-        {messages.length === 1 && (
-          <div className="border-t border-border p-4">
-            <p className="mb-3 text-sm text-muted-foreground">
-              Try these queries:
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {QUICK_SUGGESTIONS.map((suggestion) => (
-                <Button
-                  key={suggestion}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleSuggestion(suggestion)}
-                  className="h-auto py-1.5 text-xs"
-                >
-                  <ChevronRight className="mr-1 h-3 w-3" />
-                  {suggestion}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Input */}
         <div className="border-t border-border p-4">
@@ -336,12 +415,12 @@ Click the **?** button to see all available commands, or just ask me anything!`,
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask about clients, campaigns, inboxes, tasks..."
+              placeholder="Type a command (d, w, low leads, benchmarks...)"
               className="flex-1 resize-none rounded-lg border border-input bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               rows={1}
             />
             <Button
-              onClick={handleSubmit}
+              onClick={() => handleSubmit()}
               disabled={!input.trim() || isLoading}
               className="gap-2"
             >
@@ -354,7 +433,7 @@ Click the **?** button to see all available commands, or just ask me anything!`,
             </Button>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Press Enter to send, Shift+Enter for new line • Click ? for all commands
+            Press Enter to send • Shortcuts: <kbd className="px-1 py-0.5 bg-muted rounded">d</kbd> = daily, <kbd className="px-1 py-0.5 bg-muted rounded">w</kbd> = weekly
           </p>
         </div>
       </Card>

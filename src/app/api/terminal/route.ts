@@ -1,20 +1,21 @@
 import { NextResponse } from 'next/server';
+import { executeCommand, parseCommand } from '@/lib/terminal/commands';
 import { claudeService, type TerminalQueryContext } from '@/lib/services/claude';
 import { BENCHMARKS } from '@/lib/engine/benchmarks';
 
-// Fetch dashboard data internally
+// Force dynamic to prevent caching
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+// Fetch dashboard data for Claude queries
 async function getDashboardData() {
   try {
-    // Use the dashboard API directly for server-side
     const { instantlyService } = await import('@/lib/services/instantly');
     const { transformCampaignsToClients, transformAccounts, generateTasksFromClassifications } = await import('@/lib/services/dataTransformer');
     
-    // Get full analytics (includes active campaigns)
     const fullData = await instantlyService.getFullAnalytics();
-    
     const { campaigns, activeCampaigns, accounts } = fullData;
     
-    // Transform using active campaigns for classification
     const clients = transformCampaignsToClients(campaigns, activeCampaigns);
     const transformedAccounts = transformAccounts(accounts);
     const tasks = generateTasksFromClassifications(clients);
@@ -29,7 +30,7 @@ async function getDashboardData() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { query, queryType } = body;
+    const { query, queryType, useClaudeAI = false } = body;
 
     if (!query && !queryType) {
       return NextResponse.json(
@@ -38,7 +39,29 @@ export async function POST(request: Request) {
       );
     }
 
-    // Fetch real data from dashboard
+    // Check if this is a structured command or free-form query
+    const command = parseCommand(query || '');
+    
+    // If it's a known command and NOT explicitly requesting Claude AI, use the command processor
+    if (command !== 'unknown' && !useClaudeAI) {
+      console.log(`[Terminal] Executing command: ${command}`);
+      
+      const forceRefresh = (query || '').toLowerCase().startsWith('refresh ');
+      const result = await executeCommand(query, forceRefresh);
+      
+      return NextResponse.json({
+        type: 'command',
+        command: command,
+        response: formatCommandResponse(result),
+        structured: result,
+        timestamp: new Date().toISOString(),
+        dataSource: 'instantly',
+      });
+    }
+
+    // For unknown commands or Claude AI requests, use Claude
+    console.log(`[Terminal] Using Claude AI for: ${query}`);
+    
     const dashboardData = await getDashboardData();
     const { clients, accounts, tasks } = dashboardData;
 
@@ -85,7 +108,7 @@ export async function POST(request: Request) {
         CRITICAL_REPLY_RATE: BENCHMARKS.CRITICAL_REPLY_RATE,
         TARGET_CONVERSION: BENCHMARKS.TARGET_CONVERSION,
         CRITICAL_CONVERSION: BENCHMARKS.CRITICAL_CONVERSION,
-        POSITIVE_REPLY_TO_MEETING_RATIO: 40, // 40% as mentioned in docs
+        POSITIVE_REPLY_TO_MEETING_RATIO: 40,
       },
     };
 
@@ -112,7 +135,6 @@ export async function POST(request: Request) {
         result = await claudeService.generateInsights(context);
         break;
       default:
-        // Process as free-form query
         result = await claudeService.processTerminalQuery(query, context);
     }
 
@@ -124,6 +146,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
+      type: 'claude',
       response: result.response,
       data: result.data,
       timestamp: new Date().toISOString(),
@@ -135,5 +158,100 @@ export async function POST(request: Request) {
       { error: 'Failed to process query' },
       { status: 500 }
     );
+  }
+}
+
+// Format structured command response to readable text
+function formatCommandResponse(result: {
+  title: string;
+  icon: string;
+  sections: Array<{
+    title: string;
+    type: string;
+    count?: number;
+    items?: Array<{
+      name: string;
+      details: string[];
+      priority?: string;
+    }>;
+    status?: {
+      label: string;
+      value: string | number;
+      icon: string;
+      change?: string;
+    };
+  }>;
+  summary?: string[];
+  metadata: {
+    timestamp: string;
+    cached: boolean;
+    campaignCount?: number;
+    issueCount?: number;
+  };
+}): string {
+  const lines: string[] = [];
+  
+  // Title
+  lines.push(`${result.icon} **${result.title}**`);
+  lines.push('');
+  
+  // Sections
+  for (const section of result.sections) {
+    if (section.type === 'status' && section.status) {
+      lines.push(`**${section.title}**`);
+      lines.push(`${section.status.label}: ${section.status.value} ${section.status.icon}`);
+      if (section.status.change) {
+        lines.push(`(${section.status.change})`);
+      }
+      lines.push('');
+    } else if (section.items && section.items.length > 0) {
+      const countStr = section.count !== undefined ? ` (${section.count})` : '';
+      lines.push(`**${section.title}${countStr}:**`);
+      lines.push('');
+      
+      section.items.forEach((item, idx) => {
+        const priorityIcon = getPriorityIcon(item.priority);
+        lines.push(`${idx + 1}. ${priorityIcon} **${item.name}**`);
+        item.details.forEach(detail => {
+          if (detail) {
+            lines.push(`   ${detail}`);
+          }
+        });
+        lines.push('');
+      });
+    }
+  }
+  
+  // Summary
+  if (result.summary && result.summary.length > 0) {
+    lines.push('---');
+    result.summary.forEach(line => {
+      lines.push(line);
+    });
+  }
+  
+  // Metadata
+  if (result.metadata.timestamp) {
+    lines.push('');
+    lines.push(`_Data from ${result.metadata.timestamp}${result.metadata.cached ? ' (cached)' : ''}_`);
+  }
+  
+  return lines.join('\n');
+}
+
+function getPriorityIcon(priority?: string): string {
+  switch (priority) {
+    case 'URGENT':
+    case 'CRITICAL':
+      return '🔴';
+    case 'HIGH':
+      return '🟠';
+    case 'MEDIUM':
+    case 'WARNING':
+      return '🟡';
+    case 'LOW':
+      return '🟢';
+    default:
+      return '•';
   }
 }

@@ -16,6 +16,9 @@ import {
   ConversionResult,
   InboxIssue,
   TrendResult,
+  CampaignClassification,
+  ClassifiedCampaign,
+  CampaignListSummary,
 } from './types';
 
 // Parse user input to determine command
@@ -34,6 +37,7 @@ export function parseCommand(input: string): CommandType {
   
   // Fuzzy matching for natural language
   const patterns: [RegExp, CommandType][] = [
+    [/\b(list|campaigns|all campaigns|active campaigns|campaign list)\b/i, 'campaigns'],
     [/\b(today|today's)\b/i, 'daily'],
     [/\b(this week|7.?day|weekly report|week analysis)\b/i, 'weekly'],
     [/\b(send|volume|sending)\b/i, 'send_volume'],
@@ -83,6 +87,8 @@ export async function executeCommand(
   
   try {
     switch (commandType) {
+      case 'campaigns':
+        return await handleCampaignListCommand(forceRefresh);
       case 'daily':
         return await handleDailyCommand(forceRefresh);
       case 'weekly':
@@ -117,6 +123,437 @@ export async function executeCommand(
       error instanceof Error ? error.message : 'An unexpected error occurred'
     );
   }
+}
+
+// ============================================
+// CAMPAIGN LIST COMMAND
+// ============================================
+
+// Classify individual campaign based on metrics
+function classifyCampaign(metrics: {
+  sent: number;
+  contacted: number;
+  uncontacted: number;
+  opportunities: number;
+  replyRate: number;
+  posReplyToMeeting: number;
+  positiveReplies: number;
+  meetings: number;
+}): { type: CampaignClassification; reason: string; action: string; urgency: 'URGENT' | 'HIGH' | 'MEDIUM' | 'LOW'; benchmark?: string } {
+  const {
+    sent,
+    contacted,
+    uncontacted,
+    opportunities,
+    replyRate,
+    posReplyToMeeting,
+    positiveReplies,
+    meetings
+  } = metrics;
+  
+  // 1. PENDING - Not enough data
+  if (sent < BENCHMARKS.MIN_DATA_THRESHOLD) {
+    return {
+      type: 'PENDING',
+      reason: `Only ${sent.toLocaleString()} sends - need more data`,
+      action: 'Continue running, evaluate after 10k sends',
+      urgency: 'LOW'
+    };
+  }
+  
+  // 2. NOT PRIORITY - Not viable (20k+ contacted with ≤2 opportunities)
+  if (contacted >= BENCHMARKS.NOT_VIABLE_THRESHOLD && opportunities <= BENCHMARKS.NOT_VIABLE_OPP_MAX) {
+    return {
+      type: 'NOT PRIORITY',
+      reason: `${contacted.toLocaleString()} contacted → ${opportunities} opportunities - not viable`,
+      action: 'Pause campaign, not worth continuing',
+      urgency: 'HIGH',
+      benchmark: `After 20k+ leads, expected >2 opportunities`
+    };
+  }
+  
+  // 3. NOT PRIORITY - Reply rate catastrophically below benchmark
+  if (replyRate < BENCHMARKS.MIN_REPLY_RATE) {
+    const percentBelow = ((BENCHMARKS.MIN_REPLY_RATE - replyRate) / BENCHMARKS.MIN_REPLY_RATE * 100).toFixed(0);
+    return {
+      type: 'NOT PRIORITY',
+      reason: `${replyRate.toFixed(2)}% reply rate (${percentBelow}% below ${BENCHMARKS.MIN_REPLY_RATE}% min)`,
+      action: 'Review copy/targeting - too far below benchmark',
+      urgency: 'HIGH',
+      benchmark: `Minimum: ${BENCHMARKS.MIN_REPLY_RATE}% reply rate`
+    };
+  }
+  
+  // 4. NEED NEW LIST - Low leads but good performance
+  if (uncontacted < BENCHMARKS.LOW_LEADS_WARNING) {
+    const urgency = uncontacted < BENCHMARKS.LOW_LEADS_CRITICAL ? 'URGENT' : 'HIGH';
+    const timeframe = uncontacted < BENCHMARKS.LOW_LEADS_CRITICAL ? 'TODAY' : 'this week';
+    
+    return {
+      type: 'NEED NEW LIST',
+      reason: `Only ${uncontacted.toLocaleString()} leads remaining`,
+      action: `Order 30-50k leads ${timeframe}`,
+      urgency: urgency,
+      benchmark: `Need 3k+ uncontacted leads`
+    };
+  }
+  
+  // 5. REVIEW - Good reply rate but poor conversion
+  if (replyRate >= BENCHMARKS.MIN_REPLY_RATE && posReplyToMeeting < BENCHMARKS.TARGET_CONVERSION) {
+    const isBroken = posReplyToMeeting < 5 && positiveReplies > 10;
+    
+    return {
+      type: 'REVIEW',
+      reason: isBroken 
+        ? `${positiveReplies} positive replies → ${meetings} meetings (${posReplyToMeeting.toFixed(2)}%) - BROKEN subsequences`
+        : `${replyRate.toFixed(2)}% reply rate OK, but ${posReplyToMeeting.toFixed(2)}% conversion (target: ${BENCHMARKS.TARGET_CONVERSION}%)`,
+      action: isBroken
+        ? 'Fix subsequences URGENTLY (price/info/meeting)'
+        : 'Optimize subsequences to improve conversion',
+      urgency: isBroken ? 'URGENT' : 'MEDIUM',
+      benchmark: `Target: ${BENCHMARKS.TARGET_CONVERSION}% positive reply to meeting`
+    };
+  }
+  
+  // 6. NO ACTION - Performing well
+  return {
+    type: 'NO ACTION',
+    reason: `${replyRate.toFixed(2)}% reply rate, ${uncontacted.toLocaleString()} leads remaining`,
+    action: uncontacted < 5000 
+      ? 'Performing well - prepare to order leads when <3k'
+      : 'Performing well - let continue running',
+    urgency: 'LOW'
+  };
+}
+
+// Sort campaigns by priority
+function sortCampaignsByPriority(campaigns: ClassifiedCampaign[]): ClassifiedCampaign[] {
+  const priorityOrder: Record<CampaignClassification, number> = {
+    'NEED NEW LIST': 1,
+    'NOT PRIORITY': 2,
+    'REVIEW': 3,
+    'NO ACTION': 4,
+    'PENDING': 5
+  };
+  
+  const urgencyOrder: Record<string, number> = {
+    'URGENT': 1,
+    'HIGH': 2,
+    'MEDIUM': 3,
+    'LOW': 4
+  };
+  
+  return campaigns.sort((a, b) => {
+    const classDiff = priorityOrder[a.classification] - priorityOrder[b.classification];
+    if (classDiff !== 0) return classDiff;
+    
+    const urgencyDiff = urgencyOrder[a.urgency] - urgencyOrder[b.urgency];
+    if (urgencyDiff !== 0) return urgencyDiff;
+    
+    return a.uncontacted - b.uncontacted;
+  });
+}
+
+// Generate summary from classified campaigns
+function generateCampaignSummary(campaigns: ClassifiedCampaign[]): CampaignListSummary {
+  const summary: CampaignListSummary = {
+    total: campaigns.length,
+    byClassification: {
+      'NEED NEW LIST': [],
+      'NOT PRIORITY': [],
+      'REVIEW': [],
+      'NO ACTION': [],
+      'PENDING': []
+    },
+    belowBenchmarks: {
+      replyRate: [],
+      conversion: [],
+      viability: []
+    },
+    needLeads: [],
+    urgent: []
+  };
+  
+  campaigns.forEach(c => {
+    summary.byClassification[c.classification].push(c.name);
+    
+    if (c.replyRate < BENCHMARKS.MIN_REPLY_RATE) {
+      summary.belowBenchmarks.replyRate.push(c.name);
+    }
+    
+    if (c.posReplyToMeeting < BENCHMARKS.TARGET_CONVERSION && c.posReplyToMeeting > 0) {
+      summary.belowBenchmarks.conversion.push(c.name);
+    }
+    
+    if (c.contacted >= BENCHMARKS.NOT_VIABLE_THRESHOLD && c.opportunities <= BENCHMARKS.NOT_VIABLE_OPP_MAX) {
+      summary.belowBenchmarks.viability.push(c.name);
+    }
+    
+    if (c.uncontacted < BENCHMARKS.LOW_LEADS_WARNING) {
+      summary.needLeads.push({ name: c.name, remaining: c.uncontacted });
+    }
+    
+    if (c.urgency === 'URGENT') {
+      summary.urgent.push({ name: c.name, issue: c.reason, action: c.action });
+    }
+  });
+  
+  return summary;
+}
+
+async function handleCampaignListCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const cacheKey = terminalCache.getCacheKey('campaigns', {});
+  
+  if (!forceRefresh) {
+    const cached = terminalCache.get<TerminalResponse>(cacheKey, 'analytics');
+    if (cached) {
+      cached.metadata.cached = true;
+      cached.metadata.timestamp = terminalCache.getAge(cacheKey);
+      return cached;
+    }
+  }
+  
+  const data = await instantlyService.getFullAnalytics();
+  const activeCampaigns = data.activeCampaigns || [];
+  
+  // Process each campaign
+  const classifiedCampaigns: ClassifiedCampaign[] = activeCampaigns.map(campaign => {
+    const analytics = campaign.analytics;
+    
+    if (!analytics) {
+      return {
+        name: campaign.name,
+        id: campaign.id,
+        status: 'Active',
+        sent: 0,
+        contacted: 0,
+        uncontacted: 0,
+        totalLeads: 0,
+        replies: 0,
+        replyRate: 0,
+        opportunities: 0,
+        replyToOpp: 0,
+        bounced: 0,
+        bounceRate: 0,
+        positiveReplies: 0,
+        meetings: 0,
+        posReplyToMeeting: 0,
+        classification: 'PENDING' as CampaignClassification,
+        reason: 'No analytics data available',
+        action: 'Wait for data collection',
+        urgency: 'LOW' as const
+      };
+    }
+    
+    // Calculate metrics
+    const sent = analytics.sent || 0;
+    const contacted = analytics.contacted_count || analytics.contacted || 0;
+    const totalLeads = analytics.leads_count || analytics.total_leads || 0;
+    const uncontacted = totalLeads - contacted;
+    const replies = analytics.unique_replies || 0;
+    const opportunities = analytics.total_opportunities || 0;
+    const bounced = analytics.bounced || 0;
+    const positiveReplies = analytics.total_interested || 0;
+    const meetings = analytics.total_meeting_booked || 0;
+    
+    const replyRate = sent > 0 ? (replies / sent) * 100 : 0;
+    const replyToOpp = replies > 0 ? (opportunities / replies) * 100 : 0;
+    const bounceRate = sent > 0 ? (bounced / sent) * 100 : 0;
+    const posReplyToMeeting = positiveReplies > 0 ? (meetings / positiveReplies) * 100 : 0;
+    
+    // Classify
+    const classification = classifyCampaign({
+      sent,
+      contacted,
+      uncontacted,
+      opportunities,
+      replyRate,
+      posReplyToMeeting,
+      positiveReplies,
+      meetings
+    });
+    
+    return {
+      name: campaign.name,
+      id: campaign.id,
+      status: 'Active',
+      sent,
+      contacted,
+      uncontacted,
+      totalLeads,
+      replies,
+      replyRate,
+      opportunities,
+      replyToOpp,
+      bounced,
+      bounceRate,
+      positiveReplies,
+      meetings,
+      posReplyToMeeting,
+      classification: classification.type,
+      reason: classification.reason,
+      action: classification.action,
+      urgency: classification.urgency,
+      benchmark: classification.benchmark
+    };
+  });
+  
+  // Sort by priority
+  const sorted = sortCampaignsByPriority(classifiedCampaigns);
+  
+  // Generate summary
+  const summary = generateCampaignSummary(sorted);
+  
+  // Build response sections
+  const sections: TerminalSection[] = [];
+  
+  // Urgent items first
+  if (summary.urgent.length > 0) {
+    sections.push({
+      title: '🔴 URGENT - Immediate Action Required',
+      type: 'list',
+      count: summary.urgent.length,
+      items: summary.urgent.map(item => ({
+        name: item.name,
+        details: [item.issue, `Action: ${item.action}`],
+        priority: 'URGENT'
+      }))
+    });
+  }
+  
+  // Need new list
+  if (summary.byClassification['NEED NEW LIST'].length > 0) {
+    const needListCampaigns = sorted.filter(c => c.classification === 'NEED NEW LIST');
+    sections.push({
+      title: '⚠️ NEED NEW LIST (<3000 leads)',
+      type: 'list',
+      count: needListCampaigns.length,
+      items: needListCampaigns.map(c => ({
+        name: c.name,
+        details: [
+          `${c.uncontacted.toLocaleString()} leads remaining`,
+          `Reply Rate: ${c.replyRate.toFixed(2)}%`,
+          `Action: ${c.action}`
+        ],
+        priority: c.urgency
+      }))
+    });
+  }
+  
+  // Review (subsequence issues)
+  if (summary.byClassification['REVIEW'].length > 0) {
+    const reviewCampaigns = sorted.filter(c => c.classification === 'REVIEW');
+    sections.push({
+      title: '⚠️ REVIEW - Fix Subsequences',
+      type: 'list',
+      count: reviewCampaigns.length,
+      items: reviewCampaigns.map(c => ({
+        name: c.name,
+        details: [
+          `${c.positiveReplies} positive replies → ${c.meetings} meetings (${c.posReplyToMeeting.toFixed(1)}%)`,
+          `Target: 40% conversion`,
+          `Action: ${c.action}`
+        ],
+        priority: c.urgency
+      }))
+    });
+  }
+  
+  // Not priority
+  if (summary.byClassification['NOT PRIORITY'].length > 0) {
+    const notPriorityCampaigns = sorted.filter(c => c.classification === 'NOT PRIORITY');
+    sections.push({
+      title: '🚫 NOT PRIORITY - Not Viable',
+      type: 'list',
+      count: notPriorityCampaigns.length,
+      items: notPriorityCampaigns.map(c => ({
+        name: c.name,
+        details: [
+          c.reason,
+          `Action: ${c.action}`
+        ],
+        priority: 'HIGH'
+      }))
+    });
+  }
+  
+  // No action (performing well)
+  if (summary.byClassification['NO ACTION'].length > 0) {
+    const noActionCampaigns = sorted.filter(c => c.classification === 'NO ACTION');
+    sections.push({
+      title: '✅ NO ACTION - Performing Well',
+      type: 'list',
+      count: noActionCampaigns.length,
+      items: noActionCampaigns.map(c => ({
+        name: c.name,
+        details: [
+          `Reply Rate: ${c.replyRate.toFixed(2)}%`,
+          `${c.uncontacted.toLocaleString()} leads remaining`,
+          `Opportunities: ${c.opportunities}`
+        ],
+        priority: 'LOW'
+      }))
+    });
+  }
+  
+  // Pending
+  if (summary.byClassification['PENDING'].length > 0) {
+    const pendingCampaigns = sorted.filter(c => c.classification === 'PENDING');
+    sections.push({
+      title: '⏳ PENDING - Awaiting Data',
+      type: 'list',
+      count: pendingCampaigns.length,
+      items: pendingCampaigns.map(c => ({
+        name: c.name,
+        details: [
+          `${c.sent.toLocaleString()} sent (need 10k for classification)`,
+          'Continue running to gather data'
+        ],
+        priority: 'LOW'
+      }))
+    });
+  }
+  
+  // Benchmark summary
+  sections.push({
+    title: '📊 BENCHMARK STATUS',
+    type: 'summary',
+    status: {
+      label: 'Campaign Health',
+      value: `${summary.byClassification['NO ACTION'].length}/${summary.total} performing well`,
+      icon: summary.byClassification['NO ACTION'].length >= summary.total / 2 ? '✅' : '⚠️'
+    }
+  });
+  
+  const response: TerminalResponse = {
+    type: 'success',
+    command: 'campaigns',
+    title: `Active Campaign Analysis (${activeCampaigns.length} campaigns)`,
+    icon: '📊',
+    sections,
+    summary: [
+      `**${summary.total}** active campaigns analyzed`,
+      `---`,
+      `🔴 Need New List: ${summary.byClassification['NEED NEW LIST'].length}`,
+      `⚠️ Review (fix subsequences): ${summary.byClassification['REVIEW'].length}`,
+      `🚫 Not Priority: ${summary.byClassification['NOT PRIORITY'].length}`,
+      `✅ Performing Well: ${summary.byClassification['NO ACTION'].length}`,
+      `⏳ Pending: ${summary.byClassification['PENDING'].length}`,
+      `---`,
+      `Below ${BENCHMARKS.MIN_REPLY_RATE}% reply rate: ${summary.belowBenchmarks.replyRate.length}`,
+      `Below ${BENCHMARKS.TARGET_CONVERSION}% conversion: ${summary.belowBenchmarks.conversion.length}`,
+      `20k+ contacted with ≤2 opps: ${summary.belowBenchmarks.viability.length}`
+    ],
+    metadata: {
+      timestamp: 'just now',
+      cached: false,
+      campaignCount: activeCampaigns.length,
+      issueCount: summary.urgent.length + summary.byClassification['NEED NEW LIST'].length
+    }
+  };
+  
+  terminalCache.set(cacheKey, response, 'analytics');
+  return response;
 }
 
 // ============================================

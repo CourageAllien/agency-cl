@@ -19,7 +19,6 @@ import {
   Loader2,
   HelpCircle,
   Zap,
-  RefreshCw,
   ArrowUp,
   User,
   Bot,
@@ -27,6 +26,7 @@ import {
   Check,
   Calendar,
   CalendarDays,
+  ListChecks,
 } from "lucide-react";
 
 interface Message {
@@ -39,33 +39,34 @@ interface Message {
 
 // Quick suggestion chips
 const QUICK_SUGGESTIONS = [
+  { label: "List campaigns", query: "list" },
   { label: "Daily report", query: "daily" },
   { label: "Weekly analysis", query: "weekly" },
-  { label: "Low leads", query: "Which campaigns have low leads?" },
-  { label: "Inbox health", query: "How are my inboxes doing?" },
-  { label: "Reply rates", query: "Show me reply rate trends" },
-  { label: "Benchmarks", query: "Which campaigns aren't hitting benchmarks?" },
+  { label: "Inbox health", query: "inbox health" },
+  { label: "Benchmarks", query: "benchmarks" },
+  { label: "Conversion", query: "conversion" },
 ];
 
 const COMMAND_HELP = [
-  { category: "Time Analysis", commands: [
+  { category: "Campaign Analysis", commands: [
+    { cmd: "list / campaigns", desc: "List all active campaigns with classification" },
     { cmd: "daily", desc: "Analyze today's campaign performance" },
-    { cmd: "weekly", desc: "Analyze this week's campaign data" },
+    { cmd: "weekly", desc: "Analyze this week's (7 days) campaign data" },
   ]},
-  { category: "Daily Tasks", commands: [
-    { cmd: "send volume", desc: "Check if send volume is normal" },
+  { category: "Lead & Volume", commands: [
     { cmd: "low leads", desc: "Find campaigns with <3000 leads" },
-    { cmd: "blocked domains", desc: "Check for MSFT/Proofpoint/Mimecast/Cisco leads" },
+    { cmd: "send volume", desc: "Check if send volume is normal" },
+    { cmd: "blocked domains", desc: "Check for MSFT/Proofpoint/Mimecast/Cisco" },
   ]},
-  { category: "Weekly Tasks", commands: [
+  { category: "Performance", commands: [
     { cmd: "benchmarks", desc: "Campaigns not hitting targets" },
     { cmd: "conversion", desc: "Check positive reply to meeting rate" },
-    { cmd: "inbox health", desc: "Find disconnected/error inboxes" },
     { cmd: "reply trends", desc: "Analyze trending reply rates" },
+    { cmd: "inbox health", desc: "Find disconnected/error inboxes" },
   ]},
   { category: "Natural Language", commands: [
-    { cmd: "Ask anything", desc: "e.g., 'Which clients need attention?'" },
-    { cmd: "Follow-up", desc: "e.g., 'Tell me more about Privy'" },
+    { cmd: "Ask anything", desc: "e.g., 'Which campaigns need attention?'" },
+    { cmd: "Follow-up", desc: "e.g., 'Tell me more about Consumer Optix'" },
   ]},
 ];
 
@@ -272,6 +273,20 @@ export default function TerminalPage() {
               <p className="text-muted-foreground mb-8 max-w-md">
                 Ask questions about your campaigns in natural language or use quick commands
               </p>
+              
+              {/* Primary Action */}
+              <button
+                onClick={() => handleSubmit("list")}
+                className="flex items-center gap-3 p-4 rounded-xl border-2 border-primary/50 bg-primary/5 hover:bg-primary/10 transition-colors text-left w-full max-w-md mb-4"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <ListChecks className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <div className="font-semibold text-sm">List All Active Campaigns</div>
+                  <div className="text-xs text-muted-foreground">Full analysis with classification & actions</div>
+                </div>
+              </button>
               
               {/* Quick Actions */}
               <div className="grid grid-cols-2 gap-3 w-full max-w-md mb-6">

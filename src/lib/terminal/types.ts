@@ -4,7 +4,8 @@ export type CommandType =
   // Time-period analysis
   | 'daily'      // Today's campaign analysis
   | 'weekly'     // 7-day campaign analysis
-  // Task commands
+  // Campaign commands
+  | 'campaigns'  // List all active campaigns with classification
   | 'send_volume'
   | 'low_leads'
   | 'blocked_domains'
@@ -132,6 +133,15 @@ export interface TerminalItem {
 
 // Command aliases mapping
 export const COMMAND_ALIASES: Record<string, CommandType> = {
+  // Campaign list
+  'list': 'campaigns',
+  'campaigns': 'campaigns',
+  'list all active campaigns': 'campaigns',
+  'show all campaigns': 'campaigns',
+  'campaign list': 'campaigns',
+  'active campaigns': 'campaigns',
+  'all campaigns': 'campaigns',
+  
   // Daily
   'd': 'daily',
   'daily': 'daily',
@@ -216,11 +226,66 @@ export const BENCHMARKS = {
   MIN_REPLY_RATE: 0.45,        // 0.45% minimum
   TARGET_CONVERSION: 40,        // 40% positive reply to meeting
   MIN_HEALTH_SCORE: 93,         // Inbox health threshold
-  LOW_LEADS_WARNING: 3000,      // Warning threshold
+  LOW_LEADS_WARNING: 3000,      // Warning threshold (absolute number)
   LOW_LEADS_CRITICAL: 1000,     // Critical threshold
   SEND_VOLUME_THRESHOLD: -20,   // % below average = abnormally low
   TREND_SIGNIFICANT: 5,         // % change to be significant
+  MIN_DATA_THRESHOLD: 10000,    // Minimum sends for classification
+  NOT_VIABLE_THRESHOLD: 20000,  // Sends threshold for viability check
+  NOT_VIABLE_OPP_MAX: 2,        // Max opportunities for "not viable"
 };
+
+// Campaign classification types
+export type CampaignClassification = 
+  | 'NEED NEW LIST'
+  | 'NOT PRIORITY'
+  | 'REVIEW'
+  | 'NO ACTION'
+  | 'PENDING';
+
+export interface ClassifiedCampaign {
+  name: string;
+  id: string;
+  status: string;
+  
+  // Lead metrics
+  sent: number;
+  contacted: number;
+  uncontacted: number;
+  totalLeads: number;
+  
+  // Performance metrics
+  replies: number;
+  replyRate: number;
+  opportunities: number;
+  replyToOpp: number;
+  bounced: number;
+  bounceRate: number;
+  
+  // Conversion metrics
+  positiveReplies: number;
+  meetings: number;
+  posReplyToMeeting: number;
+  
+  // Classification
+  classification: CampaignClassification;
+  reason: string;
+  action: string;
+  urgency: 'URGENT' | 'HIGH' | 'MEDIUM' | 'LOW';
+  benchmark?: string;
+}
+
+export interface CampaignListSummary {
+  total: number;
+  byClassification: Record<CampaignClassification, string[]>;
+  belowBenchmarks: {
+    replyRate: string[];
+    conversion: string[];
+    viability: string[];
+  };
+  needLeads: Array<{ name: string; remaining: number }>;
+  urgent: Array<{ name: string; issue: string; action: string }>;
+}
 
 // Diagnostic steps for declining reply rates
 export const DIAGNOSTIC_STEPS = [

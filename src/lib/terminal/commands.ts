@@ -1,6 +1,17 @@
 // Campaign Terminal Command Processor
+// Comprehensive natural language command interface for Instantly.ai
 
-import { instantlyService, type InstantlyAccount, type InstantlyCampaign } from '@/lib/services/instantly';
+import { 
+  instantlyService, 
+  type InstantlyAccount, 
+  type InstantlyCampaign,
+  type LeadListInfo,
+  type BlockListEntryInfo,
+  type EmailTemplateInfo,
+  type SubsequenceInfo,
+  type AuditLogInfo,
+  type StepAnalyticsInfo,
+} from '@/lib/services/instantly';
 import { terminalCache, rateLimiter } from './cache';
 import {
   CommandType,
@@ -8,6 +19,7 @@ import {
   BENCHMARKS,
   BLOCKED_DOMAINS,
   DIAGNOSTIC_STEPS,
+  QUERY_PATTERNS,
   TerminalResponse,
   TerminalSection,
   CampaignIssue,
@@ -27,7 +39,13 @@ import {
   ProcessedInbox,
   InboxHealthStats,
   CategorizedInboxes,
+  // New types
+  DailyReportData,
+  WeeklyReportData,
 } from './types';
+
+// Store extracted parameters from natural language queries
+let queryParams: Record<string, string> = {};
 
 // ============ DATE RANGE HELPERS ============
 
@@ -55,44 +73,131 @@ function getDateRange(period: 'today' | 'week' | 'month' | 'all'): { start_date:
   }
 }
 
-// Parse user input to determine command
+// Parse user input to determine command with enhanced natural language processing
 export function parseCommand(input: string): CommandType {
   const normalized = input.toLowerCase().trim();
+  
+  // Reset query params
+  queryParams = {};
   
   // Check for refresh prefix
   if (normalized.startsWith('refresh ')) {
     return 'refresh';
   }
   
-  // Check direct aliases
+  // Check direct aliases first (exact matches)
   if (COMMAND_ALIASES[normalized]) {
     return COMMAND_ALIASES[normalized];
   }
   
-  // Fuzzy matching for natural language
-  const patterns: [RegExp, CommandType][] = [
-    [/\b(list|campaigns|all campaigns|active campaigns|campaign list)\b/i, 'campaigns'],
-    [/\b(today|today's)\b/i, 'daily'],
-    [/\b(this week|7.?day|weekly report|week analysis)\b/i, 'weekly'],
-    [/\b(send|volume|sending)\b/i, 'send_volume'],
-    [/\b(low|leads|3000|need leads)\b/i, 'low_leads'],
-    [/\b(block|microsoft|proofpoint|mimecast|cisco)\b/i, 'blocked_domains'],
-    [/\b(benchmark|target|hitting)\b/i, 'benchmarks'],
-    [/\b(conversion|meeting|40%|subsequence)\b/i, 'conversion'],
-    [/\b(inbox|disconnect|error)\b/i, 'inbox_health'],
-    [/\b(removed|removal|tag report)\b/i, 'removed_inboxes'],
-    [/\b(trend|declining|downward)\b/i, 'reply_trends'],
-    [/\b(wednesday|weekly summary|full weekly)\b/i, 'weekly_summary'],
-    [/\b(help|\?|command)\b/i, 'help'],
+  // Check QUERY_PATTERNS for complex natural language with parameter extraction
+  for (const { pattern, command, extractParams } of QUERY_PATTERNS) {
+    const match = normalized.match(pattern);
+    if (match) {
+      if (extractParams) {
+        queryParams = extractParams(match);
+      }
+      return command;
+    }
+  }
+  
+  // Fuzzy matching for common patterns
+  const fuzzyPatterns: [RegExp, CommandType][] = [
+    // Campaign queries
+    [/\b(list|campaigns|all campaigns|active campaigns|campaign list|show campaigns)\b/i, 'campaigns'],
+    [/\b(campaign analytics|campaign stats|campaign performance)\b/i, 'campaigns'],
+    
+    // Time-based queries
+    [/\b(today|today's|daily stats|daily analytics)\b/i, 'daily'],
+    [/\b(this week|last 7 days|7.?day|weekly|week stats|week analytics)\b/i, 'weekly'],
+    [/\b(daily report|daily tasks|today's tasks)\b/i, 'daily_report'],
+    [/\b(weekly report|wednesday|full weekly)\b/i, 'weekly_report'],
+    
+    // Send volume
+    [/\b(send volume|sending|emails sent|how many sent)\b/i, 'send_volume'],
+    [/\b(send volume.{0,10}7|7.{0,5}day.{0,5}send|weekly send)\b/i, 'send_volume_7d'],
+    
+    // Leads
+    [/\b(low leads|need leads|under 3000|campaigns.{0,10}leads)\b/i, 'low_leads'],
+    [/\b(interested leads|positive leads|positive replies)\b/i, 'interested'],
+    [/\b(meetings? booked|booked leads)\b/i, 'meetings_booked'],
+    [/\b(lead lists?|my lists|available lists)\b/i, 'lead_lists'],
+    
+    // ESP/Blocked domains
+    [/\b(blocked|microsoft|proofpoint|mimecast|cisco|esp check)\b/i, 'blocked_domains'],
+    [/\b(block list|blocklist|blocked entries)\b/i, 'block_list'],
+    
+    // Performance
+    [/\b(benchmark|target|hitting|underperform)\b/i, 'benchmarks'],
+    [/\b(conversion|meeting rate|40%|booking rate)\b/i, 'conversion'],
+    [/\b(low conversion|sub 40|broken subsequence)\b/i, 'low_conversion'],
+    [/\b(bad variant|underperforming variant|worst variant|trim variant)\b/i, 'bad_variants'],
+    
+    // Inbox
+    [/\b(inbox health|inbox status|email accounts?|list accounts)\b/i, 'inbox_health'],
+    [/\b(disconnect|inbox error|sending error|inbox issue)\b/i, 'inbox_issues'],
+    [/\b(removed inbox|tag removal)\b/i, 'removed_inboxes'],
+    [/\b(warmup|health score)\b/i, 'warmup_status'],
+    
+    // Trends
+    [/\b(trend|declining|downward|reply.{0,5}rate.{0,5}over)\b/i, 'reply_trends'],
+    
+    // Resources
+    [/\b(tags?|custom tags?|inbox tags?)\b/i, 'tags'],
+    [/\b(template|email template)\b/i, 'templates'],
+    [/\b(subsequence|follow.?up)\b/i, 'subsequences'],
+    
+    // Workspace
+    [/\b(workspace|my workspace)\b/i, 'workspace'],
+    [/\b(team|members?)\b/i, 'team'],
+    [/\b(audit|activity|history)\b/i, 'audit_log'],
+    [/\b(billing|usage|api usage)\b/i, 'billing'],
+    
+    // Diagnostics
+    [/\b(diagnose|analyze|what'?s wrong)\b/i, 'diagnose'],
+    [/\b(verify email|check email|validate email)\b/i, 'verify_email'],
+    
+    // Reports/Forms
+    [/\b(form.{0,5}daily|daily.{0,5}form|generate.{0,5}daily)\b/i, 'form_daily'],
+    [/\b(form.{0,5}weekly|weekly.{0,5}form|generate.{0,5}weekly)\b/i, 'form_weekly'],
+    
+    // Utility
+    [/\b(help|\?|commands?)\b/i, 'help'],
+    [/\b(status|connection|api status|test connection)\b/i, 'status'],
   ];
   
-  for (const [pattern, command] of patterns) {
+  for (const [pattern, command] of fuzzyPatterns) {
     if (pattern.test(normalized)) {
       return command;
     }
   }
   
+  // Check for question-based queries
+  if (normalized.includes('?')) {
+    // Try to infer intent from question
+    if (/which.{0,20}(campaign|inbox)/i.test(normalized)) {
+      if (/lead/i.test(normalized)) return 'low_leads';
+      if (/perform|benchmark|target/i.test(normalized)) return 'underperforming';
+      if (/disconnect|error/i.test(normalized)) return 'inbox_issues';
+      return 'campaigns';
+    }
+    if (/how.{0,10}(many|much)/i.test(normalized)) {
+      if (/sent|email/i.test(normalized)) return 'send_volume';
+      if (/lead/i.test(normalized)) return 'low_leads';
+      if (/meeting/i.test(normalized)) return 'conversion';
+      if (/inbox|account/i.test(normalized)) return 'inbox_health';
+    }
+    if (/what.{0,10}(task|do|need)/i.test(normalized)) {
+      return 'daily_report';
+    }
+  }
+  
   return 'unknown';
+}
+
+// Get extracted parameters from the last parsed query
+export function getQueryParams(): Record<string, string> {
+  return queryParams;
 }
 
 // Main command executor
@@ -110,6 +215,7 @@ export async function executeCommand(
   }
   
   let commandType = parseCommand(input);
+  const params = getQueryParams();
   
   // Handle refresh
   if (commandType === 'refresh') {
@@ -121,32 +227,112 @@ export async function executeCommand(
   
   try {
     switch (commandType) {
+      // ============ CAMPAIGN COMMANDS ============
       case 'campaigns':
         return await handleCampaignListCommand(forceRefresh);
+      case 'campaign_detail':
+        return await handleCampaignDetailCommand(params.name || input, forceRefresh);
+      
+      // ============ TIME-BASED COMMANDS ============
       case 'daily':
         return await handleDailyCommand(forceRefresh);
+      case 'daily_report':
+      case 'form_daily':
+        return await handleDailyReportCommand(forceRefresh);
       case 'weekly':
         return await handleWeeklyCommand(forceRefresh);
+      case 'weekly_report':
+      case 'form_weekly':
+        return await handleWeeklyReportCommand(forceRefresh);
+      case 'weekly_summary':
+        return await handleWeeklySummaryCommand(forceRefresh);
+      
+      // ============ SEND VOLUME ============
       case 'send_volume':
         return await handleSendVolumeCommand(forceRefresh);
+      case 'send_volume_7d':
+        return await handleSendVolume7dCommand(forceRefresh);
+      
+      // ============ LEADS ============
       case 'low_leads':
         return await handleLowLeadsCommand(forceRefresh);
+      case 'leads':
+        return await handleLeadsCommand(forceRefresh);
+      case 'leads_campaign':
+        return await handleLeadsCampaignCommand(params.campaign || '', forceRefresh);
+      case 'interested':
+        return await handleInterestedLeadsCommand(forceRefresh);
+      case 'meetings_booked':
+        return await handleMeetingsBookedCommand(forceRefresh);
+      case 'lead_lists':
+        return await handleLeadListsCommand(forceRefresh);
+      
+      // ============ ESP/BLOCKED ============
       case 'blocked_domains':
+      case 'esp_check':
         return await handleBlockedDomainsCommand(forceRefresh);
+      case 'block_list':
+        return await handleBlockListCommand(params.search, forceRefresh);
+      
+      // ============ PERFORMANCE ============
       case 'benchmarks':
+      case 'underperforming':
         return await handleBenchmarksCommand(forceRefresh);
       case 'conversion':
         return await handleConversionCommand(forceRefresh);
+      case 'low_conversion':
+        return await handleLowConversionCommand(forceRefresh);
+      case 'bad_variants':
+        return await handleBadVariantsCommand(forceRefresh);
+      
+      // ============ INBOX ============
       case 'inbox_health':
         return await handleInboxHealthCommand(forceRefresh);
+      case 'inbox_issues':
+        return await handleInboxIssuesCommand(forceRefresh);
       case 'removed_inboxes':
         return handleRemovedInboxesCommand();
+      case 'warmup_status':
+        return await handleWarmupStatusCommand(forceRefresh);
+      
+      // ============ TRENDS ============
       case 'reply_trends':
         return await handleReplyTrendsCommand(forceRefresh);
-      case 'weekly_summary':
-        return await handleWeeklySummaryCommand(forceRefresh);
+      case 'daily_trends':
+        return await handleDailyTrendsCommand(forceRefresh);
+      
+      // ============ RESOURCES ============
+      case 'tags':
+        return await handleTagsCommand(forceRefresh);
+      case 'accounts_by_tag':
+        return await handleAccountsByTagCommand(params.tag || '', forceRefresh);
+      case 'templates':
+        return await handleTemplatesCommand(forceRefresh);
+      case 'subsequences':
+        return await handleSubsequencesCommand(forceRefresh);
+      
+      // ============ WORKSPACE ============
+      case 'workspace':
+        return await handleWorkspaceCommand(forceRefresh);
+      case 'team':
+        return await handleTeamCommand(forceRefresh);
+      case 'audit_log':
+        return await handleAuditLogCommand(forceRefresh);
+      case 'billing':
+        return await handleBillingCommand(forceRefresh);
+      
+      // ============ DIAGNOSTICS ============
+      case 'diagnose':
+        return await handleDiagnoseCommand(params.campaign || input, forceRefresh);
+      case 'verify_email':
+        return await handleVerifyEmailCommand(params.email || '');
+      
+      // ============ UTILITY ============
+      case 'status':
+        return await handleStatusCommand();
       case 'help':
         return handleHelpCommand();
+      
       default:
         return createUnknownCommandResponse(input);
     }
@@ -2106,50 +2292,1337 @@ async function handleWeeklySummaryCommand(forceRefresh: boolean): Promise<Termin
 }
 
 // ============================================
+// NEW COMMAND HANDLERS - PHASE 1: DAILY TASKS
+// ============================================
+
+// Daily Report - Comprehensive form answers
+async function handleDailyReportCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const cacheKey = terminalCache.getCacheKey('daily_report', {});
+  
+  if (!forceRefresh) {
+    const cached = terminalCache.get<TerminalResponse>(cacheKey, 'daily');
+    if (cached) {
+      cached.metadata.cached = true;
+      return cached;
+    }
+  }
+  
+  const todayRange = getDateRange('today');
+  const weekRange = getDateRange('week');
+  
+  const [todayData, weekData, accountsData] = await Promise.all([
+    instantlyService.getFullAnalytics(todayRange),
+    instantlyService.getFullAnalytics(weekRange),
+    instantlyService.getFullAccountsData(),
+  ]);
+  
+  const activeCampaigns = todayData.activeCampaigns || [];
+  const accounts = accountsData.accounts || [];
+  
+  // Build comprehensive report
+  let report = '# 📋 DAILY REPORT\n\n';
+  report += `*Generated: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}*\n\n`;
+  
+  // 1. Tasks Summary
+  report += '## 📝 TASKS TO BE DONE TODAY\n\n';
+  const tasks: { campaign: string; action: string }[] = [];
+  
+  activeCampaigns.forEach(c => {
+    const a = c.analytics;
+    if (!a) return;
+    
+    const uncontacted = a.uncontacted ?? Math.max(0, (a.total_leads || 0) - (a.contacted || 0));
+    const replyRate = a.sent > 0 ? (a.unique_replies / a.sent) * 100 : 0;
+    const posToMeeting = a.total_interested > 0 ? (a.total_meeting_booked / a.total_interested) * 100 : 0;
+    
+    if (uncontacted < BENCHMARKS.LOW_LEADS_CRITICAL) {
+      tasks.push({ campaign: c.name, action: '🔴 Order 30k+ leads TODAY' });
+    } else if (uncontacted < BENCHMARKS.LOW_LEADS_WARNING) {
+      tasks.push({ campaign: c.name, action: '⚠️ Order 50k leads this week' });
+    }
+    
+    if (replyRate < BENCHMARKS.MIN_REPLY_RATE && a.sent > 1000) {
+      tasks.push({ campaign: c.name, action: `⚠️ Review copy (${replyRate.toFixed(2)}% reply rate)` });
+    }
+    
+    if (a.total_interested > 5 && a.total_meeting_booked === 0) {
+      tasks.push({ campaign: c.name, action: '🔴 Fix subsequences (0 meetings from positive replies)' });
+    } else if (posToMeeting < BENCHMARKS.TARGET_CONVERSION && a.total_interested > 3) {
+      tasks.push({ campaign: c.name, action: `⚠️ Optimize subsequences (${posToMeeting.toFixed(1)}% conversion)` });
+    }
+  });
+  
+  if (tasks.length === 0) {
+    report += '✅ No urgent tasks - all campaigns performing well!\n\n';
+  } else {
+    tasks.forEach(t => {
+      report += `• **${t.campaign}** → ${t.action}\n`;
+    });
+    report += '\n';
+  }
+  
+  // 2. Send Volume (7 days)
+  const weekSent = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.sent || 0), 0);
+  const avgDaily = Math.round(weekSent / 7);
+  
+  report += '## 📊 SEND VOLUME (Past 7 Days)\n\n';
+  report += `• Total Sent: **${weekSent.toLocaleString()}**\n`;
+  report += `• Daily Average: **${avgDaily.toLocaleString()}**\n`;
+  report += `• Status: ${avgDaily > 1000 ? '✅ Normal' : '⚠️ Below expected'}\n\n`;
+  
+  // 3. Low Leads
+  const lowLeadsCampaigns = activeCampaigns.filter(c => {
+    const a = c.analytics;
+    if (!a) return false;
+    const uncontacted = a.uncontacted ?? Math.max(0, (a.total_leads || 0) - (a.contacted || 0));
+    return uncontacted < BENCHMARKS.LOW_LEADS_WARNING;
+  });
+  
+  report += '## 🚨 CAMPAIGNS UNDER 3,000 LEADS\n\n';
+  if (lowLeadsCampaigns.length === 0) {
+    report += '✅ All campaigns have sufficient leads\n\n';
+  } else {
+    lowLeadsCampaigns.forEach(c => {
+      const a = c.analytics!;
+      const uncontacted = a.uncontacted ?? Math.max(0, (a.total_leads || 0) - (a.contacted || 0));
+      const icon = uncontacted < BENCHMARKS.LOW_LEADS_CRITICAL ? '🔴' : '⚠️';
+      report += `${icon} **${c.name}** - ${uncontacted.toLocaleString()} leads remaining\n`;
+    });
+    report += '\n';
+  }
+  
+  // 4. Inbox Issues
+  const disconnected = accounts.filter(a => a.statusLabel === 'disconnected' || a.status === -1 || a.status === 0);
+  const withErrors = accounts.filter(a => a.has_error);
+  
+  report += '## 📧 INBOX STATUS\n\n';
+  if (disconnected.length === 0 && withErrors.length === 0) {
+    report += '✅ No disconnected inboxes or sending errors\n\n';
+  } else {
+    if (disconnected.length > 0) {
+      report += `🔴 **Disconnected:** ${disconnected.length} inboxes\n`;
+    }
+    if (withErrors.length > 0) {
+      report += `⚠️ **Sending Errors:** ${withErrors.length} inboxes\n`;
+    }
+    report += '\n';
+  }
+  
+  // 5. Campaigns Not Hitting Benchmarks
+  const belowBenchmark = activeCampaigns.filter(c => {
+    const a = c.analytics;
+    if (!a || a.sent < 1000) return false;
+    const replyRate = (a.unique_replies / a.sent) * 100;
+    return replyRate < BENCHMARKS.MIN_REPLY_RATE;
+  });
+  
+  report += '## 📉 CAMPAIGNS BELOW BENCHMARKS\n\n';
+  if (belowBenchmark.length === 0) {
+    report += '✅ All campaigns hitting benchmarks\n\n';
+  } else {
+    belowBenchmark.forEach(c => {
+      const a = c.analytics!;
+      const replyRate = (a.unique_replies / a.sent) * 100;
+      report += `⚠️ **${c.name}** - ${replyRate.toFixed(2)}% reply rate (target: ${BENCHMARKS.MIN_REPLY_RATE}%)\n`;
+    });
+    report += '\n';
+  }
+  
+  // 6. Sub 40% Conversion
+  const lowConversion = activeCampaigns.filter(c => {
+    const a = c.analytics;
+    if (!a || a.total_interested < 3) return false;
+    const rate = (a.total_meeting_booked / a.total_interested) * 100;
+    return rate < BENCHMARKS.TARGET_CONVERSION;
+  });
+  
+  report += '## 🎯 SUB 40% POSITIVE REPLY TO MEETING\n\n';
+  if (lowConversion.length === 0) {
+    report += '✅ All campaigns above 40% conversion\n\n';
+  } else {
+    lowConversion.forEach(c => {
+      const a = c.analytics!;
+      const rate = (a.total_meeting_booked / a.total_interested) * 100;
+      report += `⚠️ **${c.name}** - ${a.total_interested} positive → ${a.total_meeting_booked} meetings (${rate.toFixed(1)}%)\n`;
+    });
+    report += '\n';
+  }
+  
+  report += '---\n\n';
+  report += '*Copy this report to fill your daily form!*';
+  
+  const response: TerminalResponse = {
+    type: 'success',
+    command: 'daily_report',
+    title: 'Daily Report',
+    icon: '📋',
+    sections: [{
+      title: 'DAILY REPORT',
+      type: 'summary',
+      items: [{ name: 'Full Report', details: [report] }]
+    }],
+    summary: [
+      `${tasks.length} tasks to complete`,
+      `${lowLeadsCampaigns.length} campaigns need leads`,
+      `${disconnected.length + withErrors.length} inbox issues`
+    ],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+  
+  terminalCache.set(cacheKey, response, 'daily');
+  return response;
+}
+
+// Send Volume 7 Days - Weekly trend
+async function handleSendVolume7dCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const cacheKey = terminalCache.getCacheKey('send_volume_7d', {});
+  
+  if (!forceRefresh) {
+    const cached = terminalCache.get<TerminalResponse>(cacheKey, 'analytics');
+    if (cached) {
+      cached.metadata.cached = true;
+      return cached;
+    }
+  }
+  
+  const weekRange = getDateRange('week');
+  const data = await instantlyService.getFullAnalytics(weekRange);
+  const activeCampaigns = data.activeCampaigns || [];
+  
+  // Get daily analytics for trend
+  const dailyRes = await instantlyService.getCampaignAnalyticsDaily({
+    start_date: weekRange?.start_date,
+    end_date: weekRange?.end_date,
+  });
+  
+  const dailyData = dailyRes.data || [];
+  const weekSent = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.sent || 0), 0);
+  
+  // Calculate trend
+  let trendText = '';
+  if (dailyData.length >= 2) {
+    const firstHalf = dailyData.slice(0, Math.floor(dailyData.length / 2));
+    const secondHalf = dailyData.slice(Math.floor(dailyData.length / 2));
+    const firstAvg = firstHalf.reduce((sum, d) => sum + d.sent, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((sum, d) => sum + d.sent, 0) / secondHalf.length;
+    const change = ((secondAvg - firstAvg) / firstAvg) * 100;
+    
+    if (change < -10) {
+      trendText = `⚠️ **Declining** (${change.toFixed(1)}% from first half of week)`;
+    } else if (change > 10) {
+      trendText = `✅ **Increasing** (+${change.toFixed(1)}% from first half of week)`;
+    } else {
+      trendText = '✅ **Stable** (within normal range)';
+    }
+  }
+  
+  let report = '## 📊 7-Day Send Volume Analysis\n\n';
+  report += `**Total Sent:** ${weekSent.toLocaleString()}\n`;
+  report += `**Daily Average:** ${Math.round(weekSent / 7).toLocaleString()}\n`;
+  report += `**Trend:** ${trendText}\n\n`;
+  
+  // Daily breakdown
+  if (dailyData.length > 0) {
+    report += '### Daily Breakdown\n\n';
+    dailyData.forEach(d => {
+      const date = new Date(d.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const bar = '█'.repeat(Math.min(20, Math.round(d.sent / 500)));
+      report += `${date}: ${d.sent.toLocaleString()} ${bar}\n`;
+    });
+  }
+  
+  const response: TerminalResponse = {
+    type: 'success',
+    command: 'send_volume_7d',
+    title: '7-Day Send Volume',
+    icon: '📊',
+    sections: [{
+      title: 'SEND VOLUME TREND',
+      type: 'summary',
+      items: [{ name: 'Analysis', details: [report] }]
+    }],
+    summary: [
+      `${weekSent.toLocaleString()} total sent`,
+      `${Math.round(weekSent / 7).toLocaleString()}/day average`
+    ],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+  
+  terminalCache.set(cacheKey, response, 'analytics');
+  return response;
+}
+
+// Campaign Detail - Get specific campaign info
+async function handleCampaignDetailCommand(campaignName: string, forceRefresh: boolean): Promise<TerminalResponse> {
+  const data = await instantlyService.getFullAnalytics();
+  const campaigns = data.activeCampaigns || [];
+  
+  // Find matching campaign
+  const searchLower = campaignName.toLowerCase().replace(/campaign$/i, '').trim();
+  const campaign = campaigns.find(c => 
+    c.name.toLowerCase().includes(searchLower) ||
+    c.id === searchLower
+  );
+  
+  if (!campaign) {
+    return {
+      type: 'error',
+      command: 'campaign_detail',
+      title: 'Campaign Not Found',
+      icon: '❌',
+      sections: [{
+        title: 'NOT FOUND',
+        type: 'summary',
+        items: [{
+          name: `No campaign matching "${campaignName}"`,
+          details: ['Try using "list" to see all campaigns']
+        }]
+      }],
+      summary: [],
+      metadata: { timestamp: 'just now', cached: false }
+    };
+  }
+  
+  const a = campaign.analytics;
+  let report = `# ${campaign.name}\n\n`;
+  report += `**Status:** ${campaign.isActive ? '🟢 Active' : '⏸️ Paused'}\n`;
+  report += `**ID:** \`${campaign.id}\`\n\n`;
+  
+  if (a) {
+    const uncontacted = a.uncontacted ?? Math.max(0, (a.total_leads || 0) - (a.contacted || 0));
+    const replyRate = a.sent > 0 ? (a.unique_replies / a.sent) * 100 : 0;
+    const posToMeeting = a.total_interested > 0 ? (a.total_meeting_booked / a.total_interested) * 100 : 0;
+    
+    report += '## 📊 Performance Metrics\n\n';
+    report += `• **Sent:** ${a.sent.toLocaleString()}\n`;
+    report += `• **Reply Rate:** ${replyRate.toFixed(2)}% ${replyRate >= BENCHMARKS.MIN_REPLY_RATE ? '✅' : '⚠️'}\n`;
+    report += `• **Replies:** ${a.unique_replies.toLocaleString()}\n`;
+    report += `• **Opportunities:** ${a.total_opportunities}\n\n`;
+    
+    report += '## 👥 Lead Status\n\n';
+    report += `• **Total Leads:** ${(a.total_leads || 0).toLocaleString()}\n`;
+    report += `• **Contacted:** ${a.contacted.toLocaleString()}\n`;
+    report += `• **Uncontacted:** ${uncontacted.toLocaleString()} ${uncontacted < BENCHMARKS.LOW_LEADS_WARNING ? '⚠️' : '✅'}\n\n`;
+    
+    report += '## 🎯 Conversion\n\n';
+    report += `• **Positive Replies:** ${a.total_interested}\n`;
+    report += `• **Meetings Booked:** ${a.total_meeting_booked}\n`;
+    report += `• **Pos Reply → Meeting:** ${posToMeeting.toFixed(1)}% ${posToMeeting >= BENCHMARKS.TARGET_CONVERSION ? '✅' : '⚠️'}\n`;
+  } else {
+    report += '⚠️ No analytics data available yet\n';
+  }
+  
+  return {
+    type: 'success',
+    command: 'campaign_detail',
+    title: campaign.name,
+    icon: '📋',
+    sections: [{
+      title: 'CAMPAIGN DETAILS',
+      type: 'summary',
+      items: [{ name: 'Details', details: [report] }]
+    }],
+    summary: [],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Weekly Report - Comprehensive form answers
+async function handleWeeklyReportCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const cacheKey = terminalCache.getCacheKey('weekly_report', {});
+  
+  if (!forceRefresh) {
+    const cached = terminalCache.get<TerminalResponse>(cacheKey, 'analytics');
+    if (cached) {
+      cached.metadata.cached = true;
+      return cached;
+    }
+  }
+  
+  const weekRange = getDateRange('week');
+  const [weekData, accountsData] = await Promise.all([
+    instantlyService.getFullAnalytics(weekRange),
+    instantlyService.getFullAccountsData(),
+  ]);
+  
+  const activeCampaigns = weekData.activeCampaigns || [];
+  const accounts = accountsData.accounts || [];
+  
+  let report = '# 📊 WEEKLY REPORT (Wednesday Checklist)\n\n';
+  report += `*Week of ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}*\n\n`;
+  
+  // 1. Inbox Health
+  const disconnected = accounts.filter(a => a.statusLabel === 'disconnected' || a.status === -1);
+  const withErrors = accounts.filter(a => a.has_error);
+  const lowHealth = accounts.filter(a => (a.health_score || a.warmup_score || 100) < BENCHMARKS.MIN_HEALTH_SCORE);
+  
+  report += '## ✅ INBOX HEALTH CHECK\n\n';
+  report += `• Total Inboxes: ${accounts.length}\n`;
+  report += `• Healthy: ${accounts.length - disconnected.length - withErrors.length} ✅\n`;
+  report += `• Disconnected: ${disconnected.length} ${disconnected.length > 0 ? '🔴' : ''}\n`;
+  report += `• Sending Errors: ${withErrors.length} ${withErrors.length > 0 ? '⚠️' : ''}\n`;
+  report += `• Low Health Score: ${lowHealth.length}\n\n`;
+  
+  // 2. Reply Rates
+  const totalSent = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.sent || 0), 0);
+  const totalReplies = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.unique_replies || 0), 0);
+  const overallReplyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
+  
+  report += '## ✅ REPLY RATES\n\n';
+  report += `• Overall Reply Rate: ${overallReplyRate.toFixed(2)}% ${overallReplyRate >= BENCHMARKS.MIN_REPLY_RATE ? '✅' : '⚠️'}\n`;
+  report += `• Benchmark: ${BENCHMARKS.MIN_REPLY_RATE}%\n`;
+  report += `• Total Replies: ${totalReplies.toLocaleString()}\n\n`;
+  
+  // 3. Meeting Booking Rate
+  const totalInterested = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.total_interested || 0), 0);
+  const totalMeetings = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.total_meeting_booked || 0), 0);
+  const meetingRate = totalInterested > 0 ? (totalMeetings / totalInterested) * 100 : 0;
+  
+  report += '## ✅ MEETING BOOKING RATE\n\n';
+  report += `• Positive Replies: ${totalInterested}\n`;
+  report += `• Meetings Booked: ${totalMeetings}\n`;
+  report += `• Conversion Rate: ${meetingRate.toFixed(1)}% ${meetingRate >= BENCHMARKS.TARGET_CONVERSION ? '✅' : '⚠️'}\n`;
+  report += `• Benchmark: ${BENCHMARKS.TARGET_CONVERSION}%\n\n`;
+  
+  // 4. Bad Variants (placeholder - would need step analytics)
+  report += '## ✅ BAD VARIANTS\n\n';
+  report += '_Check Instantly dashboard for variant-level performance_\n\n';
+  
+  // 5. Benchmarks
+  const belowBenchmark = activeCampaigns.filter(c => {
+    const a = c.analytics;
+    if (!a || a.sent < 1000) return false;
+    return (a.unique_replies / a.sent) * 100 < BENCHMARKS.MIN_REPLY_RATE;
+  });
+  
+  report += '## ✅ BENCHMARK CHECK\n\n';
+  if (belowBenchmark.length === 0) {
+    report += '✅ All campaigns hitting benchmarks!\n\n';
+  } else {
+    report += `⚠️ ${belowBenchmark.length} campaigns below ${BENCHMARKS.MIN_REPLY_RATE}% reply rate:\n`;
+    belowBenchmark.slice(0, 5).forEach(c => {
+      const rate = (c.analytics!.unique_replies / c.analytics!.sent) * 100;
+      report += `• ${c.name}: ${rate.toFixed(2)}%\n`;
+    });
+    report += '\n';
+  }
+  
+  report += '---\n\n';
+  report += '*Copy this report to fill your Wednesday form!*';
+  
+  const response: TerminalResponse = {
+    type: 'success',
+    command: 'weekly_report',
+    title: 'Weekly Report',
+    icon: '📊',
+    sections: [{
+      title: 'WEEKLY REPORT',
+      type: 'summary',
+      items: [{ name: 'Full Report', details: [report] }]
+    }],
+    summary: [],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+  
+  terminalCache.set(cacheKey, response, 'analytics');
+  return response;
+}
+
+// ============================================
+// NEW COMMAND HANDLERS - PHASE 2: RESOURCES
+// ============================================
+
+// Leads overview
+async function handleLeadsCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const data = await instantlyService.getFullAnalytics();
+  const activeCampaigns = data.activeCampaigns || [];
+  
+  let report = '## 👥 Lead Overview\n\n';
+  
+  let totalLeads = 0;
+  let totalContacted = 0;
+  let totalUncontacted = 0;
+  
+  activeCampaigns.forEach(c => {
+    const a = c.analytics;
+    if (!a) return;
+    totalLeads += a.total_leads || 0;
+    totalContacted += a.contacted || 0;
+    totalUncontacted += a.uncontacted ?? Math.max(0, (a.total_leads || 0) - (a.contacted || 0));
+  });
+  
+  report += `**Total Leads:** ${totalLeads.toLocaleString()}\n`;
+  report += `**Contacted:** ${totalContacted.toLocaleString()}\n`;
+  report += `**Uncontacted:** ${totalUncontacted.toLocaleString()}\n\n`;
+  
+  report += '### By Campaign\n\n';
+  activeCampaigns.slice(0, 10).forEach(c => {
+    const a = c.analytics;
+    if (!a) return;
+    const uncontacted = a.uncontacted ?? Math.max(0, (a.total_leads || 0) - (a.contacted || 0));
+    const icon = uncontacted < BENCHMARKS.LOW_LEADS_CRITICAL ? '🔴' : 
+                 uncontacted < BENCHMARKS.LOW_LEADS_WARNING ? '⚠️' : '✅';
+    report += `${icon} **${c.name}**: ${uncontacted.toLocaleString()} uncontacted\n`;
+  });
+  
+  return {
+    type: 'success',
+    command: 'leads',
+    title: 'Lead Overview',
+    icon: '👥',
+    sections: [{ title: 'LEADS', type: 'summary', items: [{ name: 'Overview', details: [report] }] }],
+    summary: [],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Leads for specific campaign
+async function handleLeadsCampaignCommand(campaignName: string, forceRefresh: boolean): Promise<TerminalResponse> {
+  return handleCampaignDetailCommand(campaignName, forceRefresh);
+}
+
+// Interested leads
+async function handleInterestedLeadsCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const data = await instantlyService.getFullAnalytics();
+  const activeCampaigns = data.activeCampaigns || [];
+  
+  let report = '## 🌟 Interested/Positive Leads\n\n';
+  
+  let totalInterested = 0;
+  const byCampaign: { name: string; count: number }[] = [];
+  
+  activeCampaigns.forEach(c => {
+    const interested = c.analytics?.total_interested || 0;
+    if (interested > 0) {
+      totalInterested += interested;
+      byCampaign.push({ name: c.name, count: interested });
+    }
+  });
+  
+  report += `**Total Interested:** ${totalInterested}\n\n`;
+  
+  byCampaign.sort((a, b) => b.count - a.count);
+  report += '### By Campaign\n\n';
+  byCampaign.slice(0, 15).forEach(c => {
+    report += `• **${c.name}**: ${c.count} interested\n`;
+  });
+  
+  return {
+    type: 'success',
+    command: 'interested',
+    title: 'Interested Leads',
+    icon: '🌟',
+    sections: [{ title: 'INTERESTED', type: 'summary', items: [{ name: 'Overview', details: [report] }] }],
+    summary: [`${totalInterested} total interested leads`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Meetings booked
+async function handleMeetingsBookedCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const data = await instantlyService.getFullAnalytics();
+  const activeCampaigns = data.activeCampaigns || [];
+  
+  let report = '## 📅 Meetings Booked\n\n';
+  
+  let totalMeetings = 0;
+  const byCampaign: { name: string; count: number; interested: number }[] = [];
+  
+  activeCampaigns.forEach(c => {
+    const meetings = c.analytics?.total_meeting_booked || 0;
+    const interested = c.analytics?.total_interested || 0;
+    totalMeetings += meetings;
+    if (interested > 0) {
+      byCampaign.push({ name: c.name, count: meetings, interested });
+    }
+  });
+  
+  report += `**Total Meetings Booked:** ${totalMeetings}\n\n`;
+  
+  byCampaign.sort((a, b) => b.count - a.count);
+  report += '### By Campaign\n\n';
+  byCampaign.slice(0, 15).forEach(c => {
+    const rate = c.interested > 0 ? (c.count / c.interested * 100).toFixed(1) : '0';
+    report += `• **${c.name}**: ${c.count} meetings (${rate}% conversion)\n`;
+  });
+  
+  return {
+    type: 'success',
+    command: 'meetings_booked',
+    title: 'Meetings Booked',
+    icon: '📅',
+    sections: [{ title: 'MEETINGS', type: 'summary', items: [{ name: 'Overview', details: [report] }] }],
+    summary: [`${totalMeetings} total meetings booked`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Lead lists
+async function handleLeadListsCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getLeadLists({ limit: 100 });
+  
+  if (result.error) {
+    return createErrorResponse('lead_lists', result.error);
+  }
+  
+  const lists = result.data || [];
+  
+  let report = '## 📋 Lead Lists\n\n';
+  report += `**Total Lists:** ${lists.length}\n\n`;
+  
+  if (lists.length === 0) {
+    report += '_No lead lists found_\n';
+  } else {
+    lists.forEach(l => {
+      report += `• **${l.name}**: ${l.lead_count.toLocaleString()} leads\n`;
+    });
+  }
+  
+  return {
+    type: 'success',
+    command: 'lead_lists',
+    title: 'Lead Lists',
+    icon: '📋',
+    sections: [{ title: 'LISTS', type: 'summary', items: [{ name: 'Lists', details: [report] }] }],
+    summary: [`${lists.length} lead lists`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Block list
+async function handleBlockListCommand(search?: string, forceRefresh?: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getBlockListEntries({ search, limit: 100 });
+  
+  if (result.error) {
+    return createErrorResponse('block_list', result.error);
+  }
+  
+  const entries = result.data || [];
+  
+  let report = '## 🚫 Block List\n\n';
+  
+  if (search) {
+    report += `**Search:** "${search}"\n`;
+    report += `**Found:** ${entries.length} entries\n\n`;
+  } else {
+    report += `**Total Blocked:** ${entries.length} entries\n\n`;
+  }
+  
+  const domains = entries.filter(e => e.type === 'domain');
+  const emails = entries.filter(e => e.type === 'email');
+  
+  if (domains.length > 0) {
+    report += '### Blocked Domains\n';
+    domains.slice(0, 20).forEach(d => {
+      report += `• ${d.value}\n`;
+    });
+    if (domains.length > 20) report += `_...and ${domains.length - 20} more_\n`;
+    report += '\n';
+  }
+  
+  if (emails.length > 0) {
+    report += '### Blocked Emails\n';
+    emails.slice(0, 20).forEach(e => {
+      report += `• ${e.value}\n`;
+    });
+    if (emails.length > 20) report += `_...and ${emails.length - 20} more_\n`;
+  }
+  
+  return {
+    type: 'success',
+    command: 'block_list',
+    title: 'Block List',
+    icon: '🚫',
+    sections: [{ title: 'BLOCKED', type: 'summary', items: [{ name: 'Entries', details: [report] }] }],
+    summary: [`${entries.length} blocked entries`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Low conversion (sub 40%)
+async function handleLowConversionCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  return handleConversionCommand(forceRefresh); // Already handles low conversion
+}
+
+// Bad variants
+async function handleBadVariantsCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getCampaignStepAnalytics({});
+  
+  if (result.error) {
+    return createErrorResponse('bad_variants', result.error);
+  }
+  
+  const steps = result.data || [];
+  
+  // Filter for underperforming variants
+  const badVariants = steps.filter(s => s.sent > 100 && s.reply_rate < BENCHMARKS.MIN_REPLY_RATE);
+  badVariants.sort((a, b) => a.reply_rate - b.reply_rate);
+  
+  let report = '## 📧 Underperforming Variants\n\n';
+  
+  if (badVariants.length === 0) {
+    report += '✅ All variants performing above benchmark!\n';
+  } else {
+    report += `Found **${badVariants.length}** variants below ${BENCHMARKS.MIN_REPLY_RATE}% reply rate:\n\n`;
+    
+    badVariants.slice(0, 15).forEach(v => {
+      report += `• **${v.variant}** (Step ${v.step_number})\n`;
+      report += `  Sent: ${v.sent} | Replies: ${v.replied} | Rate: ${v.reply_rate.toFixed(2)}%\n`;
+    });
+  }
+  
+  return {
+    type: 'success',
+    command: 'bad_variants',
+    title: 'Bad Variants',
+    icon: '📧',
+    sections: [{ title: 'VARIANTS', type: 'summary', items: [{ name: 'Analysis', details: [report] }] }],
+    summary: [`${badVariants.length} underperforming variants`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Inbox issues (grouped by tag)
+async function handleInboxIssuesCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const [accountsData, tagsRes] = await Promise.all([
+    instantlyService.getFullAccountsData(),
+    instantlyService.getAllCustomTags(),
+  ]);
+  
+  const accounts = accountsData.accounts || [];
+  const tags = tagsRes.data || [];
+  
+  const disconnected = accounts.filter(a => a.statusLabel === 'disconnected' || a.status === -1 || a.status === 0);
+  const withErrors = accounts.filter(a => a.has_error);
+  
+  let report = '## 🔴 Inbox Issues\n\n';
+  
+  if (disconnected.length === 0 && withErrors.length === 0) {
+    report += '✅ **No issues found!** All inboxes are healthy.\n';
+  } else {
+    // Group by tag
+    const tagGroups: Record<string, { disconnected: string[]; errors: string[] }> = {};
+    
+    [...disconnected, ...withErrors].forEach(a => {
+      const tag = a.tags?.[0] || 'Untagged';
+      if (!tagGroups[tag]) {
+        tagGroups[tag] = { disconnected: [], errors: [] };
+      }
+      if (a.statusLabel === 'disconnected' || a.status === -1) {
+        tagGroups[tag].disconnected.push(a.email);
+      }
+      if (a.has_error) {
+        tagGroups[tag].errors.push(a.email);
+      }
+    });
+    
+    report += `**Total Disconnected:** ${disconnected.length}\n`;
+    report += `**Total with Errors:** ${withErrors.length}\n\n`;
+    
+    report += '### By Tag\n\n';
+    Object.entries(tagGroups).forEach(([tag, data]) => {
+      report += `**${tag}**\n`;
+      if (data.disconnected.length > 0) {
+        report += `  🔴 Disconnected: ${data.disconnected.length}\n`;
+      }
+      if (data.errors.length > 0) {
+        report += `  ⚠️ Errors: ${data.errors.length}\n`;
+      }
+    });
+    
+    report += '\n### Action Required\n\n';
+    report += '1. Go to Instantly → Email Accounts\n';
+    report += '2. Reconnect disconnected accounts\n';
+    report += '3. Fix sending errors\n';
+    report += '4. Consider removing problematic inboxes\n';
+  }
+  
+  return {
+    type: 'success',
+    command: 'inbox_issues',
+    title: 'Inbox Issues',
+    icon: '🔴',
+    sections: [{ title: 'ISSUES', type: 'summary', items: [{ name: 'Report', details: [report] }] }],
+    summary: [`${disconnected.length} disconnected`, `${withErrors.length} errors`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Warmup status
+async function handleWarmupStatusCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const accountsData = await instantlyService.getFullAccountsData();
+  const accounts = accountsData.accounts || [];
+  
+  const warmingUp = accounts.filter(a => a.warmup_enabled);
+  const lowHealth = accounts.filter(a => (a.warmup_score || 100) < BENCHMARKS.MIN_HEALTH_SCORE);
+  
+  let report = '## 🔥 Warmup Status\n\n';
+  report += `**Total Accounts:** ${accounts.length}\n`;
+  report += `**Warmup Enabled:** ${warmingUp.length}\n`;
+  report += `**Low Health Score:** ${lowHealth.length}\n\n`;
+  
+  if (lowHealth.length > 0) {
+    report += '### Accounts Needing Attention\n\n';
+    lowHealth.slice(0, 10).forEach(a => {
+      report += `⚠️ **${a.email}**: ${a.warmup_score || 0}% health\n`;
+    });
+  }
+  
+  return {
+    type: 'success',
+    command: 'warmup_status',
+    title: 'Warmup Status',
+    icon: '🔥',
+    sections: [{ title: 'WARMUP', type: 'summary', items: [{ name: 'Status', details: [report] }] }],
+    summary: [`${warmingUp.length} warming up`, `${lowHealth.length} need attention`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Daily trends
+async function handleDailyTrendsCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const weekRange = getDateRange('week');
+  const result = await instantlyService.getCampaignAnalyticsDaily({
+    start_date: weekRange?.start_date,
+    end_date: weekRange?.end_date,
+  });
+  
+  if (result.error) {
+    return createErrorResponse('daily_trends', result.error);
+  }
+  
+  const data = result.data || [];
+  
+  let report = '## 📈 Daily Trends (7 Days)\n\n';
+  
+  if (data.length === 0) {
+    report += '_No daily data available_\n';
+  } else {
+    report += '| Date | Sent | Replies | Rate |\n';
+    report += '|------|------|---------|------|\n';
+    
+    data.forEach(d => {
+      const date = new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const rate = d.sent > 0 ? ((d.replies / d.sent) * 100).toFixed(2) : '0.00';
+      report += `| ${date} | ${d.sent.toLocaleString()} | ${d.replies} | ${rate}% |\n`;
+    });
+  }
+  
+  return {
+    type: 'success',
+    command: 'daily_trends',
+    title: 'Daily Trends',
+    icon: '📈',
+    sections: [{ title: 'TRENDS', type: 'summary', items: [{ name: 'Data', details: [report] }] }],
+    summary: [],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Tags
+async function handleTagsCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getAllCustomTags();
+  
+  if (result.error) {
+    return createErrorResponse('tags', result.error);
+  }
+  
+  const tags = result.data || [];
+  
+  let report = '## 🏷️ Custom Tags\n\n';
+  report += `**Total Tags:** ${tags.length}\n\n`;
+  
+  tags.forEach(t => {
+    report += `• **${t.name}**\n`;
+  });
+  
+  return {
+    type: 'success',
+    command: 'tags',
+    title: 'Custom Tags',
+    icon: '🏷️',
+    sections: [{ title: 'TAGS', type: 'summary', items: [{ name: 'List', details: [report] }] }],
+    summary: [`${tags.length} tags`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Accounts by tag
+async function handleAccountsByTagCommand(tagName: string, forceRefresh: boolean): Promise<TerminalResponse> {
+  const [accountsData, tagsRes] = await Promise.all([
+    instantlyService.getFullAccountsData(),
+    instantlyService.getAllCustomTags(),
+  ]);
+  
+  const accounts = accountsData.accounts || [];
+  const tags = tagsRes.data || [];
+  
+  const tag = tags.find(t => t.name.toLowerCase().includes(tagName.toLowerCase()));
+  
+  if (!tag) {
+    return {
+      type: 'error',
+      command: 'accounts_by_tag',
+      title: 'Tag Not Found',
+      icon: '❌',
+      sections: [{ title: 'ERROR', type: 'summary', items: [{ name: `Tag "${tagName}" not found`, details: [] }] }],
+      summary: [],
+      metadata: { timestamp: 'just now', cached: false }
+    };
+  }
+  
+  const filtered = accounts.filter(a => a.tags?.includes(tag.name));
+  
+  let report = `## 🏷️ Accounts Tagged: ${tag.name}\n\n`;
+  report += `**Count:** ${filtered.length}\n\n`;
+  
+  filtered.slice(0, 20).forEach(a => {
+    const statusIcon = a.statusLabel === 'connected' ? '✅' : a.statusLabel === 'disconnected' ? '🔴' : '⚠️';
+    report += `${statusIcon} ${a.email}\n`;
+  });
+  
+  if (filtered.length > 20) {
+    report += `\n_...and ${filtered.length - 20} more_\n`;
+  }
+  
+  return {
+    type: 'success',
+    command: 'accounts_by_tag',
+    title: `Accounts: ${tag.name}`,
+    icon: '🏷️',
+    sections: [{ title: 'ACCOUNTS', type: 'summary', items: [{ name: 'List', details: [report] }] }],
+    summary: [`${filtered.length} accounts with tag "${tag.name}"`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Templates
+async function handleTemplatesCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getEmailTemplates({ limit: 50 });
+  
+  if (result.error) {
+    return createErrorResponse('templates', result.error);
+  }
+  
+  const templates = result.data || [];
+  
+  let report = '## 📧 Email Templates\n\n';
+  report += `**Total Templates:** ${templates.length}\n\n`;
+  
+  templates.forEach(t => {
+    report += `• **${t.name}**\n`;
+    if (t.subject) report += `  Subject: ${t.subject.slice(0, 50)}...\n`;
+  });
+  
+  return {
+    type: 'success',
+    command: 'templates',
+    title: 'Email Templates',
+    icon: '📧',
+    sections: [{ title: 'TEMPLATES', type: 'summary', items: [{ name: 'List', details: [report] }] }],
+    summary: [`${templates.length} templates`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Subsequences
+async function handleSubsequencesCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getCampaignSubsequences({ limit: 50 });
+  
+  if (result.error) {
+    return createErrorResponse('subsequences', result.error);
+  }
+  
+  const subsequences = result.data || [];
+  
+  let report = '## 🔄 Campaign Subsequences\n\n';
+  report += `**Total:** ${subsequences.length}\n\n`;
+  
+  subsequences.forEach(s => {
+    report += `• **${s.name}**\n`;
+    if (s.trigger_type) report += `  Trigger: ${s.trigger_type}\n`;
+  });
+  
+  return {
+    type: 'success',
+    command: 'subsequences',
+    title: 'Subsequences',
+    icon: '🔄',
+    sections: [{ title: 'SUBSEQUENCES', type: 'summary', items: [{ name: 'List', details: [report] }] }],
+    summary: [`${subsequences.length} subsequences`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Workspace
+async function handleWorkspaceCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getCurrentWorkspace();
+  
+  if (result.error) {
+    return createErrorResponse('workspace', result.error);
+  }
+  
+  const ws = result.data!;
+  
+  let report = '## 🏢 Workspace\n\n';
+  report += `**Name:** ${ws.name}\n`;
+  if (ws.owner_email) report += `**Owner:** ${ws.owner_email}\n`;
+  if (ws.plan) report += `**Plan:** ${ws.plan}\n`;
+  
+  return {
+    type: 'success',
+    command: 'workspace',
+    title: 'Workspace',
+    icon: '🏢',
+    sections: [{ title: 'WORKSPACE', type: 'summary', items: [{ name: 'Info', details: [report] }] }],
+    summary: [],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Team
+async function handleTeamCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getWorkspaceMembers({ limit: 50 });
+  
+  if (result.error) {
+    return createErrorResponse('team', result.error);
+  }
+  
+  const members = result.data || [];
+  
+  let report = '## 👥 Team Members\n\n';
+  report += `**Total Members:** ${members.length}\n\n`;
+  
+  members.forEach(m => {
+    report += `• **${m.email}** (${m.role})\n`;
+  });
+  
+  return {
+    type: 'success',
+    command: 'team',
+    title: 'Team Members',
+    icon: '👥',
+    sections: [{ title: 'TEAM', type: 'summary', items: [{ name: 'Members', details: [report] }] }],
+    summary: [`${members.length} members`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Audit log
+async function handleAuditLogCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const result = await instantlyService.getAuditLogs({ limit: 20 });
+  
+  if (result.error) {
+    return createErrorResponse('audit_log', result.error);
+  }
+  
+  const logs = result.data || [];
+  
+  let report = '## 📜 Recent Activity\n\n';
+  
+  if (logs.length === 0) {
+    report += '_No recent activity found_\n';
+  } else {
+    logs.forEach(l => {
+      const date = new Date(l.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      report += `• **${l.action}** on ${l.resource_type}\n`;
+      report += `  ${date}${l.user_email ? ` by ${l.user_email}` : ''}\n`;
+    });
+  }
+  
+  return {
+    type: 'success',
+    command: 'audit_log',
+    title: 'Audit Log',
+    icon: '📜',
+    sections: [{ title: 'ACTIVITY', type: 'summary', items: [{ name: 'Log', details: [report] }] }],
+    summary: [`${logs.length} recent activities`],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Billing
+async function handleBillingCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  // Note: Billing endpoint may require special permissions
+  return {
+    type: 'info',
+    command: 'billing',
+    title: 'Billing Information',
+    icon: '💳',
+    sections: [{
+      title: 'BILLING',
+      type: 'summary',
+      items: [{
+        name: 'Check Instantly Dashboard',
+        details: [
+          'Billing information is available in the Instantly dashboard.',
+          'Go to Settings → Billing to view your plan and usage.'
+        ]
+      }]
+    }],
+    summary: [],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Diagnose campaign
+async function handleDiagnoseCommand(input: string, forceRefresh: boolean): Promise<TerminalResponse> {
+  const data = await instantlyService.getFullAnalytics();
+  const campaigns = data.activeCampaigns || [];
+  
+  // Extract campaign name
+  const searchTerm = input.replace(/^diagnose\s*/i, '').replace(/^analyze\s*/i, '').replace(/^what'?s wrong with\s*/i, '').trim();
+  
+  const campaign = campaigns.find(c => 
+    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.id === searchTerm
+  );
+  
+  if (!campaign) {
+    return {
+      type: 'error',
+      command: 'diagnose',
+      title: 'Campaign Not Found',
+      icon: '❌',
+      sections: [{
+        title: 'NOT FOUND',
+        type: 'summary',
+        items: [{
+          name: `No campaign matching "${searchTerm}"`,
+          details: ['Try: diagnose [campaign name]']
+        }]
+      }],
+      summary: [],
+      metadata: { timestamp: 'just now', cached: false }
+    };
+  }
+  
+  const a = campaign.analytics;
+  let report = `# 🔍 Diagnosis: ${campaign.name}\n\n`;
+  
+  if (!a) {
+    report += '⚠️ No analytics data available yet. Let the campaign run longer.\n';
+  } else {
+    const uncontacted = a.uncontacted ?? Math.max(0, (a.total_leads || 0) - (a.contacted || 0));
+    const replyRate = a.sent > 0 ? (a.unique_replies / a.sent) * 100 : 0;
+    const posToMeeting = a.total_interested > 0 ? (a.total_meeting_booked / a.total_interested) * 100 : 0;
+    
+    report += '## 📊 Current Status\n\n';
+    report += `• Sent: ${a.sent.toLocaleString()}\n`;
+    report += `• Reply Rate: ${replyRate.toFixed(2)}%\n`;
+    report += `• Uncontacted: ${uncontacted.toLocaleString()}\n`;
+    report += `• Positive Replies: ${a.total_interested}\n`;
+    report += `• Meetings: ${a.total_meeting_booked}\n\n`;
+    
+    report += '## 🔍 Issues Found\n\n';
+    let issueCount = 0;
+    
+    if (a.sent < BENCHMARKS.MIN_DATA_THRESHOLD) {
+      report += `⏳ **Insufficient Data**: Only ${a.sent.toLocaleString()} sent. Need 10k+ for reliable analysis.\n\n`;
+    } else {
+      if (replyRate < BENCHMARKS.MIN_REPLY_RATE) {
+        issueCount++;
+        report += `🔴 **Low Reply Rate**: ${replyRate.toFixed(2)}% (target: ${BENCHMARKS.MIN_REPLY_RATE}%)\n\n`;
+        report += '**Recommended Actions:**\n';
+        DIAGNOSTIC_STEPS.forEach(step => {
+          report += `  • ${step}\n`;
+        });
+        report += '\n';
+      }
+      
+      if (uncontacted < BENCHMARKS.LOW_LEADS_CRITICAL) {
+        issueCount++;
+        report += `🔴 **Critical Lead Shortage**: Only ${uncontacted.toLocaleString()} remaining\n`;
+        report += '**Action:** Order 30k+ leads TODAY\n\n';
+      } else if (uncontacted < BENCHMARKS.LOW_LEADS_WARNING) {
+        issueCount++;
+        report += `⚠️ **Low Leads**: ${uncontacted.toLocaleString()} remaining\n`;
+        report += '**Action:** Order 50k leads this week\n\n';
+      }
+      
+      if (a.total_interested > 5 && a.total_meeting_booked === 0) {
+        issueCount++;
+        report += `🔴 **Broken Subsequences**: ${a.total_interested} positive replies → 0 meetings\n`;
+        report += '**Action:** Review price/info/meeting subsequences immediately\n\n';
+      } else if (posToMeeting < BENCHMARKS.TARGET_CONVERSION && a.total_interested > 3) {
+        issueCount++;
+        report += `⚠️ **Low Conversion**: ${posToMeeting.toFixed(1)}% (target: ${BENCHMARKS.TARGET_CONVERSION}%)\n`;
+        report += '**Action:** Optimize subsequences\n\n';
+      }
+      
+      if (issueCount === 0) {
+        report += '✅ **No major issues found!** Campaign is performing well.\n';
+      }
+    }
+  }
+  
+  return {
+    type: 'success',
+    command: 'diagnose',
+    title: `Diagnosis: ${campaign.name}`,
+    icon: '🔍',
+    sections: [{ title: 'DIAGNOSIS', type: 'summary', items: [{ name: 'Report', details: [report] }] }],
+    summary: [],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// Verify email
+async function handleVerifyEmailCommand(email: string): Promise<TerminalResponse> {
+  if (!email || !email.includes('@')) {
+    return {
+      type: 'error',
+      command: 'verify_email',
+      title: 'Invalid Email',
+      icon: '❌',
+      sections: [{
+        title: 'ERROR',
+        type: 'summary',
+        items: [{ name: 'Please provide a valid email address', details: ['Usage: verify email@example.com'] }]
+      }],
+      summary: [],
+      metadata: { timestamp: 'just now', cached: false }
+    };
+  }
+  
+  const result = await instantlyService.verifyEmail(email);
+  
+  if (result.error) {
+    return createErrorResponse('verify_email', result.error);
+  }
+  
+  const data = result.data!;
+  
+  let report = `## ✉️ Email Verification: ${email}\n\n`;
+  report += `**Valid:** ${data.is_valid ? '✅ Yes' : '❌ No'}\n`;
+  report += `**Status:** ${data.status}\n`;
+  if (data.reason) report += `**Reason:** ${data.reason}\n`;
+  
+  return {
+    type: 'success',
+    command: 'verify_email',
+    title: 'Email Verification',
+    icon: '✉️',
+    sections: [{ title: 'RESULT', type: 'summary', items: [{ name: 'Verification', details: [report] }] }],
+    summary: [data.is_valid ? '✅ Valid email' : '❌ Invalid email'],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// API Status
+async function handleStatusCommand(): Promise<TerminalResponse> {
+  const result = await instantlyService.testConnection();
+  
+  let report = '## 🔌 API Connection Status\n\n';
+  
+  if (result.success) {
+    report += '✅ **Connected to Instantly API v2**\n\n';
+    report += `• Campaigns found: ${result.campaignCount}\n`;
+    report += `• Status: ${result.message}\n`;
+  } else {
+    report += '❌ **Connection Failed**\n\n';
+    report += `• Error: ${result.message}\n`;
+    report += '\nCheck your API key in environment variables.\n';
+  }
+  
+  return {
+    type: result.success ? 'success' : 'error',
+    command: 'status',
+    title: 'API Status',
+    icon: result.success ? '✅' : '❌',
+    sections: [{ title: 'STATUS', type: 'summary', items: [{ name: 'Connection', details: [report] }] }],
+    summary: [result.success ? 'Connected' : 'Disconnected'],
+    metadata: { timestamp: 'just now', cached: false }
+  };
+}
+
+// ============================================
 // UTILITY COMMANDS
 // ============================================
 
 function handleHelpCommand(): TerminalResponse {
+  let helpText = `# 💡 Campaign Terminal Commands
+
+Use natural language or quick commands to analyze your Instantly campaigns.
+
+## 📋 Daily Commands
+| Command | Description |
+|---------|-------------|
+| \`daily\` | Today's campaign analysis |
+| \`daily report\` | Full daily form answers |
+| \`send volume\` | Check today's send volume |
+| \`send volume 7d\` | 7-day send volume trend |
+| \`low leads\` | Campaigns under 3,000 leads |
+| \`blocked domains\` | Check MSFT/Proofpoint/Mimecast/Cisco |
+
+## 📊 Weekly Commands
+| Command | Description |
+|---------|-------------|
+| \`weekly\` | 7-day performance analysis |
+| \`weekly report\` | Full Wednesday form answers |
+| \`benchmarks\` | Campaigns not hitting targets |
+| \`conversion\` | Positive reply to meeting rate |
+| \`bad variants\` | Underperforming email variants |
+| \`reply trends\` | Reply rate trends over time |
+
+## 📧 Inbox Commands
+| Command | Description |
+|---------|-------------|
+| \`inbox health\` | Full inbox health report |
+| \`inbox issues\` | Disconnected/error inboxes by tag |
+| \`warmup\` | Warmup status and health scores |
+| \`accounts\` | List all email accounts |
+
+## 👥 Lead Commands
+| Command | Description |
+|---------|-------------|
+| \`leads\` | Lead overview across campaigns |
+| \`interested\` | Positive/interested leads |
+| \`meetings booked\` | Leads with meetings booked |
+| \`lead lists\` | View all lead lists |
+
+## 🏷️ Resources
+| Command | Description |
+|---------|-------------|
+| \`campaigns\` / \`list\` | All active campaigns with analysis |
+| \`tags\` | View all custom tags |
+| \`templates\` | Email templates |
+| \`block list\` | View blocked domains/emails |
+| \`subsequences\` | Campaign subsequences |
+
+## 🔍 Diagnostics
+| Command | Description |
+|---------|-------------|
+| \`diagnose [campaign]\` | AI diagnosis for specific campaign |
+| \`verify [email]\` | Verify single email address |
+| \`status\` | Check API connection |
+
+## 💬 Natural Language Examples
+- "Which campaigns need leads?"
+- "How is Consumer Optix doing?"
+- "What are my tasks today?"
+- "Are there disconnected inboxes?"
+- "Show me campaigns below benchmark"
+
+## ⚡ Quick Tips
+- Use \`refresh [command]\` for fresh data
+- Type naturally - I understand questions!
+- Click on campaign links for details
+`;
+
   return {
     type: 'info',
     command: 'help',
     title: 'Campaign Terminal Commands',
     icon: '💡',
-    sections: [
-      {
-        title: 'DAILY COMMANDS',
-        type: 'list',
-        items: [
-          { name: 'daily (or d)', details: ['Full daily summary'] },
-          { name: 'send volume', details: ['Check if send volume is low'] },
-          { name: 'low leads', details: ['Campaigns <3000 leads'] },
-          { name: 'blocked domains', details: ['Check MSFT/Proofpoint/Mimecast/Cisco'] }
-        ]
-      },
-      {
-        title: 'WEEKLY COMMANDS',
-        type: 'list',
-        items: [
-          { name: 'weekly summary (or w)', details: ['Full Wednesday checklist'] },
-          { name: 'benchmarks', details: ['Campaigns not hitting targets'] },
-          { name: 'conversion', details: ['<40% positive reply to meeting'] },
-          { name: 'inbox health', details: ['Disconnected/error inboxes'] },
-          { name: 'reply trends', details: ['Trending downward analysis'] },
-          { name: 'removed inboxes', details: ['Tag removal report'] }
-        ]
-      },
-      {
-        title: 'UTILITY',
-        type: 'list',
-        items: [
-          { name: 'refresh [command]', details: ['Force fresh data'] },
-          { name: 'help', details: ['Show this guide'] }
-        ]
-      }
-    ],
+    sections: [{
+      title: 'HELP',
+      type: 'summary',
+      items: [{ name: 'Commands', details: [helpText] }]
+    }],
     summary: [
-      'Shortcuts: d = daily, w = weekly summary',
-      'Natural language also works!'
+      'Natural language queries supported!',
+      'Try: "What do I need to do today?"'
     ],
     metadata: {
       timestamp: 'just now',

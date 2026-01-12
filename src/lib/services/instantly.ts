@@ -297,6 +297,84 @@ export interface InstantlyLead {
   campaign_id?: string;
 }
 
+// ============ NEW TYPES FOR EXPANDED API ============
+
+export interface LeadListInfo {
+  id: string;
+  name: string;
+  lead_count: number;
+  created_at?: string;
+}
+
+export interface BlockListEntryInfo {
+  id: string;
+  value: string;
+  type: 'email' | 'domain';
+  created_at?: string;
+}
+
+export interface EmailTemplateInfo {
+  id: string;
+  name: string;
+  subject?: string;
+  body?: string;
+  created_at?: string;
+}
+
+export interface SubsequenceInfo {
+  id: string;
+  campaign_id: string;
+  name: string;
+  trigger_type?: string;
+}
+
+export interface LeadLabelInfo {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+export interface AuditLogInfo {
+  id: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  user_email?: string;
+  timestamp: string;
+}
+
+export interface WorkspaceInfoData {
+  id: string;
+  name: string;
+  owner_email?: string;
+  plan?: string;
+}
+
+export interface WorkspaceMemberInfo {
+  email: string;
+  role: string;
+  joined_at?: string;
+}
+
+export interface EmailVerificationResult {
+  email: string;
+  is_valid: boolean;
+  status: string;
+  reason?: string;
+}
+
+export interface StepAnalyticsInfo {
+  campaign_id: string;
+  step_number: number;
+  variant: string;
+  sent: number;
+  opened: number;
+  replied: number;
+  bounced: number;
+  reply_rate: number;
+  open_rate: number;
+}
+
 // ============ STATUS MAPPINGS ============
 
 const CAMPAIGN_STATUS_MAP: Record<number, string> = {
@@ -892,7 +970,7 @@ class InstantlyService {
   }): Promise<InstantlyApiResponse<InstantlyLead[]>> {
     const response = await this.request<unknown>('/leads/list', {
       method: 'POST',
-      body: JSON.stringify(params),
+      body: JSON.stringify({ ...params, limit: params.limit || 100 }),
     });
     
     if (response.error) return { error: response.error, status: response.status };
@@ -910,7 +988,337 @@ class InstantlyService {
       campaign_id: l.campaign,
     }));
     
-    return { data: leads, status: response.status };
+    return { 
+      data: leads, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  /**
+   * Get interested/positive leads
+   */
+  async getInterestedLeads(params?: { campaign_id?: string; limit?: number }): Promise<InstantlyApiResponse<InstantlyLead[]>> {
+    return this.getLeads({
+      ...params,
+      interest_status: '1', // 1 = Interested
+      limit: params?.limit || 100,
+    });
+  }
+
+  /**
+   * Get leads with meetings booked
+   */
+  async getMeetingBookedLeads(params?: { campaign_id?: string; limit?: number }): Promise<InstantlyApiResponse<InstantlyLead[]>> {
+    return this.getLeads({
+      ...params,
+      interest_status: '3', // 3 = Meeting Booked
+      limit: params?.limit || 100,
+    });
+  }
+
+  // ============ LEAD LISTS ============
+
+  async getLeadLists(params?: { limit?: number; starting_after?: string }): Promise<InstantlyApiResponse<LeadListInfo[]>> {
+    const query = new URLSearchParams();
+    query.set('limit', String(params?.limit || 100));
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
+
+    const endpoint = `/lead-lists?${query}`;
+    const response = await this.request<unknown>(endpoint);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = this.extractArray<{ id: string; name: string; leads_count?: number; timestamp_created?: string }>(response.data);
+    
+    const lists: LeadListInfo[] = raw.map(l => ({
+      id: l.id,
+      name: l.name,
+      lead_count: l.leads_count || 0,
+      created_at: l.timestamp_created,
+    }));
+    
+    return { 
+      data: lists, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  // ============ BLOCK LIST ============
+
+  async getBlockListEntries(params?: { 
+    search?: string; 
+    limit?: number; 
+    starting_after?: string 
+  }): Promise<InstantlyApiResponse<BlockListEntryInfo[]>> {
+    const query = new URLSearchParams();
+    query.set('limit', String(params?.limit || 100));
+    if (params?.search) query.set('search', params.search);
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
+
+    const endpoint = `/block-list-entries?${query}`;
+    const response = await this.request<unknown>(endpoint);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = this.extractArray<{ id: string; value: string; type?: string; timestamp_created?: string }>(response.data);
+    
+    const entries: BlockListEntryInfo[] = raw.map(e => ({
+      id: e.id,
+      value: e.value,
+      type: (e.type as 'email' | 'domain') || (e.value.includes('@') ? 'email' : 'domain'),
+      created_at: e.timestamp_created,
+    }));
+    
+    return { 
+      data: entries, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  // ============ EMAIL TEMPLATES ============
+
+  async getEmailTemplates(params?: { limit?: number; starting_after?: string }): Promise<InstantlyApiResponse<EmailTemplateInfo[]>> {
+    const query = new URLSearchParams();
+    query.set('limit', String(params?.limit || 100));
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
+
+    const endpoint = `/email-templates?${query}`;
+    const response = await this.request<unknown>(endpoint);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = this.extractArray<{ id: string; name: string; subject?: string; body?: string; timestamp_created?: string }>(response.data);
+    
+    const templates: EmailTemplateInfo[] = raw.map(t => ({
+      id: t.id,
+      name: t.name,
+      subject: t.subject,
+      body: t.body,
+      created_at: t.timestamp_created,
+    }));
+    
+    return { 
+      data: templates, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  // ============ CAMPAIGN SUBSEQUENCES ============
+
+  async getCampaignSubsequences(params?: { 
+    campaign_id?: string; 
+    limit?: number; 
+    starting_after?: string 
+  }): Promise<InstantlyApiResponse<SubsequenceInfo[]>> {
+    const query = new URLSearchParams();
+    query.set('limit', String(params?.limit || 100));
+    if (params?.campaign_id) query.set('campaign_id', params.campaign_id);
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
+
+    const endpoint = `/campaign-subsequences?${query}`;
+    const response = await this.request<unknown>(endpoint);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = this.extractArray<{ id: string; campaign_id: string; name: string; trigger_type?: string }>(response.data);
+    
+    const subsequences: SubsequenceInfo[] = raw.map(s => ({
+      id: s.id,
+      campaign_id: s.campaign_id,
+      name: s.name,
+      trigger_type: s.trigger_type,
+    }));
+    
+    return { 
+      data: subsequences, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  // ============ LEAD LABELS ============
+
+  async getLeadLabels(params?: { limit?: number; starting_after?: string }): Promise<InstantlyApiResponse<LeadLabelInfo[]>> {
+    const query = new URLSearchParams();
+    query.set('limit', String(params?.limit || 100));
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
+
+    const endpoint = `/lead-labels?${query}`;
+    const response = await this.request<unknown>(endpoint);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = this.extractArray<{ id: string; name: string; color?: string }>(response.data);
+    
+    const labels: LeadLabelInfo[] = raw.map(l => ({
+      id: l.id,
+      name: l.name,
+      color: l.color,
+    }));
+    
+    return { 
+      data: labels, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  // ============ AUDIT LOG ============
+
+  async getAuditLogs(params?: { 
+    limit?: number; 
+    starting_after?: string;
+    resource_type?: string;
+  }): Promise<InstantlyApiResponse<AuditLogInfo[]>> {
+    const query = new URLSearchParams();
+    query.set('limit', String(params?.limit || 50));
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
+    if (params?.resource_type) query.set('resource_type', params.resource_type);
+
+    const endpoint = `/audit-logs?${query}`;
+    const response = await this.request<unknown>(endpoint);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = this.extractArray<{ 
+      id: string; 
+      action: string; 
+      resource_type: string; 
+      resource_id?: string;
+      user_email?: string;
+      timestamp?: string;
+    }>(response.data);
+    
+    const logs: AuditLogInfo[] = raw.map(l => ({
+      id: l.id,
+      action: l.action,
+      resource_type: l.resource_type,
+      resource_id: l.resource_id,
+      user_email: l.user_email,
+      timestamp: l.timestamp || new Date().toISOString(),
+    }));
+    
+    return { 
+      data: logs, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  // ============ WORKSPACE ============
+
+  async getCurrentWorkspace(): Promise<InstantlyApiResponse<WorkspaceInfoData>> {
+    const response = await this.request<unknown>('/workspaces/current');
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = response.data as { id?: string; name?: string; owner_email?: string; plan?: string } || {};
+    
+    return { 
+      data: {
+        id: raw.id || '',
+        name: raw.name || 'Unknown',
+        owner_email: raw.owner_email,
+        plan: raw.plan,
+      }, 
+      status: response.status 
+    };
+  }
+
+  async getWorkspaceMembers(params?: { limit?: number; starting_after?: string }): Promise<InstantlyApiResponse<WorkspaceMemberInfo[]>> {
+    const query = new URLSearchParams();
+    query.set('limit', String(params?.limit || 100));
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
+
+    const endpoint = `/workspace-members?${query}`;
+    const response = await this.request<unknown>(endpoint);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = this.extractArray<{ email: string; role: string; timestamp_joined?: string }>(response.data);
+    
+    const members: WorkspaceMemberInfo[] = raw.map(m => ({
+      email: m.email,
+      role: m.role,
+      joined_at: m.timestamp_joined,
+    }));
+    
+    return { 
+      data: members, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  // ============ EMAIL VERIFICATION ============
+
+  async verifyEmail(email: string): Promise<InstantlyApiResponse<EmailVerificationResult>> {
+    const response = await this.request<unknown>(`/email-verification/${encodeURIComponent(email)}`);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = response.data as { 
+      email?: string; 
+      is_valid?: boolean; 
+      status?: string;
+      reason?: string;
+    } || {};
+    
+    return { 
+      data: {
+        email: raw.email || email,
+        is_valid: raw.is_valid ?? false,
+        status: raw.status || 'unknown',
+        reason: raw.reason,
+      }, 
+      status: response.status 
+    };
+  }
+
+  // ============ VARIANT/STEP ANALYTICS ============
+
+  async getCampaignStepAnalytics(params?: {
+    campaign_id?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<InstantlyApiResponse<StepAnalyticsInfo[]>> {
+    const query = new URLSearchParams();
+    if (params?.campaign_id) query.set('campaign_id', params.campaign_id);
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+
+    const endpoint = `/campaigns/analytics/steps${query.toString() ? `?${query}` : ''}`;
+    const response = await this.request<unknown>(endpoint);
+    
+    if (response.error) return { error: response.error, status: response.status };
+    
+    const raw = this.extractArray<{
+      campaign_id: string;
+      step_number: number;
+      variant?: string;
+      sent: number;
+      opened: number;
+      replied: number;
+      bounced: number;
+    }>(response.data);
+    
+    const steps: StepAnalyticsInfo[] = raw.map(s => ({
+      campaign_id: s.campaign_id,
+      step_number: s.step_number,
+      variant: s.variant || `Variant ${s.step_number}`,
+      sent: s.sent || 0,
+      opened: s.opened || 0,
+      replied: s.replied || 0,
+      bounced: s.bounced || 0,
+      reply_rate: s.sent > 0 ? (s.replied / s.sent) * 100 : 0,
+      open_rate: s.sent > 0 ? (s.opened / s.sent) * 100 : 0,
+    }));
+    
+    return { data: steps, status: response.status };
   }
 
   // ============ UTILITY METHODS ============

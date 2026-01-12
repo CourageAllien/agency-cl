@@ -37,36 +37,70 @@ interface Message {
   isTyping?: boolean;
 }
 
-// Quick suggestion chips
+// Quick suggestion chips - organized by use case
 const QUICK_SUGGESTIONS = [
-  { label: "List campaigns", query: "list" },
-  { label: "Daily report", query: "daily" },
-  { label: "Weekly analysis", query: "weekly" },
-  { label: "Inbox health", query: "inbox health" },
-  { label: "Benchmarks", query: "benchmarks" },
+  { label: "📊 Campaigns", query: "list" },
+  { label: "📋 Daily Report", query: "daily report" },
+  { label: "📈 Weekly Report", query: "weekly report" },
+  { label: "📧 Inbox Health", query: "inbox health" },
+  { label: "🚨 Low Leads", query: "low leads" },
+  { label: "📉 Benchmarks", query: "benchmarks" },
+];
+
+// Extended suggestions for after first query
+const MORE_SUGGESTIONS = [
   { label: "Conversion", query: "conversion" },
+  { label: "Reply Trends", query: "reply trends" },
+  { label: "Send Volume 7d", query: "send volume 7d" },
+  { label: "Interested", query: "interested" },
+  { label: "Meetings", query: "meetings booked" },
+  { label: "Diagnose", query: "diagnose" },
+  { label: "Tags", query: "tags" },
+  { label: "Templates", query: "templates" },
 ];
 
 const COMMAND_HELP = [
-  { category: "Campaign Analysis", commands: [
-    { cmd: "list / campaigns", desc: "List all active campaigns with classification" },
-    { cmd: "daily", desc: "Analyze today's campaign performance" },
-    { cmd: "weekly", desc: "Analyze this week's (7 days) campaign data" },
+  { category: "📋 Daily Tasks", commands: [
+    { cmd: "daily", desc: "Today's campaign analysis" },
+    { cmd: "daily report", desc: "Full daily form answers" },
+    { cmd: "send volume", desc: "Check send volume" },
+    { cmd: "send volume 7d", desc: "7-day send trend" },
+    { cmd: "low leads", desc: "Campaigns <3000 leads" },
   ]},
-  { category: "Lead & Volume", commands: [
-    { cmd: "low leads", desc: "Find campaigns with <3000 leads" },
-    { cmd: "send volume", desc: "Check if send volume is normal" },
-    { cmd: "blocked domains", desc: "Check for MSFT/Proofpoint/Mimecast/Cisco" },
+  { category: "📊 Weekly Tasks", commands: [
+    { cmd: "weekly", desc: "7-day performance" },
+    { cmd: "weekly report", desc: "Wednesday form answers" },
+    { cmd: "benchmarks", desc: "Below target campaigns" },
+    { cmd: "conversion", desc: "Positive reply to meeting" },
+    { cmd: "bad variants", desc: "Underperforming variants" },
+    { cmd: "reply trends", desc: "Reply rate trends" },
   ]},
-  { category: "Performance", commands: [
-    { cmd: "benchmarks", desc: "Campaigns not hitting targets" },
-    { cmd: "conversion", desc: "Check positive reply to meeting rate" },
-    { cmd: "reply trends", desc: "Analyze trending reply rates" },
-    { cmd: "inbox health", desc: "Find disconnected/error inboxes" },
+  { category: "📧 Inboxes", commands: [
+    { cmd: "inbox health", desc: "Full inbox report" },
+    { cmd: "inbox issues", desc: "Disconnected/errors by tag" },
+    { cmd: "warmup", desc: "Warmup status" },
   ]},
-  { category: "Natural Language", commands: [
-    { cmd: "Ask anything", desc: "e.g., 'Which campaigns need attention?'" },
-    { cmd: "Follow-up", desc: "e.g., 'Tell me more about Consumer Optix'" },
+  { category: "👥 Leads", commands: [
+    { cmd: "leads", desc: "Lead overview" },
+    { cmd: "interested", desc: "Positive leads" },
+    { cmd: "meetings booked", desc: "Booked leads" },
+    { cmd: "lead lists", desc: "View lead lists" },
+  ]},
+  { category: "🏷️ Resources", commands: [
+    { cmd: "campaigns / list", desc: "All campaigns with analysis" },
+    { cmd: "tags", desc: "Custom tags" },
+    { cmd: "templates", desc: "Email templates" },
+    { cmd: "block list", desc: "Blocked entries" },
+  ]},
+  { category: "🔍 Diagnostics", commands: [
+    { cmd: "diagnose [name]", desc: "Diagnose specific campaign" },
+    { cmd: "verify [email]", desc: "Verify email address" },
+    { cmd: "status", desc: "Check API connection" },
+  ]},
+  { category: "💬 Natural Language", commands: [
+    { cmd: "Which campaigns need leads?", desc: "Question format" },
+    { cmd: "How is [campaign] doing?", desc: "Campaign-specific" },
+    { cmd: "What are my tasks today?", desc: "Task summary" },
   ]},
 ];
 
@@ -342,12 +376,25 @@ export default function TerminalPage() {
               </div>
 
               {/* Suggestion chips */}
-              <div className="flex flex-wrap gap-2 justify-center">
+              <div className="flex flex-wrap gap-2 justify-center max-w-xl">
                 {QUICK_SUGGESTIONS.slice(2).map((s) => (
                   <button
                     key={s.label}
                     onClick={() => handleSubmit(s.query)}
                     className="px-3 py-1.5 rounded-full border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              
+              {/* More suggestions */}
+              <div className="mt-4 flex flex-wrap gap-2 justify-center max-w-xl">
+                {MORE_SUGGESTIONS.slice(0, 4).map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => handleSubmit(s.query)}
+                    className="px-2.5 py-1 rounded-full border border-border/50 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                   >
                     {s.label}
                   </button>
@@ -426,7 +473,7 @@ export default function TerminalPage() {
           {/* Quick suggestions when there are messages */}
           {messages.length > 0 && (
             <div className="flex gap-2 mb-3 overflow-x-auto pb-2 scrollbar-none">
-              {QUICK_SUGGESTIONS.map((s) => (
+              {[...QUICK_SUGGESTIONS, ...MORE_SUGGESTIONS.slice(0, 4)].map((s) => (
                 <button
                   key={s.label}
                   onClick={() => handleSubmit(s.query)}

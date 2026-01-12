@@ -82,6 +82,83 @@ export interface InboxIssue {
   landedSpam?: number;
 }
 
+// Detailed inbox health types
+export type InboxIssueSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+
+export type InboxIssueType = 
+  | 'DISCONNECTED'
+  | 'AUTH_ERROR'
+  | 'SMTP_ERROR'
+  | 'SENDING_ERROR'
+  | 'LOW_HEALTH'
+  | 'WARMUP_DISABLED';
+
+export interface DetectedIssue {
+  type: InboxIssueType;
+  severity: InboxIssueSeverity;
+  message: string;
+  details?: string;
+  icon: string;
+}
+
+export interface InboxAction {
+  label: string;
+  action: string;
+  priority: 'URGENT' | 'HIGH' | 'MEDIUM' | 'LOW';
+  steps: string[];
+}
+
+export interface ProcessedInbox {
+  email: string;
+  status: string;
+  statusCode: number;
+  statusMessage?: string;
+  
+  // Health metrics
+  healthScore: number | null;
+  landedInbox: number | null;
+  landedSpam: number | null;
+  
+  // Sending capacity
+  dailyLimit: number;
+  warmupStatus: number;
+  warmupEnabled: boolean;
+  lastUsed?: string;
+  
+  // Issues
+  issues: DetectedIssue[];
+  hasIssues: boolean;
+  severity: InboxIssueSeverity;
+  
+  // Impact
+  affectedCampaigns: string[];
+  campaignCount: number;
+  lostCapacity: number;
+  daysSinceLastUsed: number | null;
+  
+  // Recommendations
+  actions: InboxAction[];
+}
+
+export interface InboxHealthStats {
+  total: number;
+  healthy: number;
+  withIssues: number;
+  critical: number;
+  high: number;
+  medium: number;
+  totalLostCapacity: number;
+  healthPercentage: string;
+  issueTypes: Record<InboxIssueType, number>;
+}
+
+export interface CategorizedInboxes {
+  critical: ProcessedInbox[];
+  high: ProcessedInbox[];
+  medium: ProcessedInbox[];
+  healthy: ProcessedInbox[];
+}
+
 export interface TrendResult {
   name: string;
   week1Rate: number;

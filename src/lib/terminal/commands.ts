@@ -19,6 +19,14 @@ import {
   CampaignClassification,
   ClassifiedCampaign,
   CampaignListSummary,
+  // Inbox health types
+  InboxIssueSeverity,
+  InboxIssueType,
+  DetectedIssue,
+  InboxAction,
+  ProcessedInbox,
+  InboxHealthStats,
+  CategorizedInboxes,
 } from './types';
 
 // Parse user input to determine command
@@ -1293,6 +1301,201 @@ async function handleConversionCommand(forceRefresh: boolean): Promise<TerminalR
   return response;
 }
 
+// ============================================
+// INBOX HEALTH DETECTION HELPERS
+// ============================================
+
+function detectInboxIssues(account: {
+  status: number;
+  statusLabel: string;
+  error_message?: string;
+  has_error: boolean;
+  warmup_score: number;
+  warmup_enabled: boolean;
+  health_score: number;
+  landed_inbox: number;
+  landed_spam: number;
+}): DetectedIssue[] {
+  const issues: DetectedIssue[] = [];
+  
+  // 1. Disconnected
+  if (account.status === 0 || account.status === -1 || account.statusLabel === 'disconnected') {
+    issues.push({
+      type: 'DISCONNECTED',
+      severity: 'CRITICAL',
+      message: 'Account is disconnected',
+      icon: '🔴'
+    });
+  }
+  
+  // 2. Check error message for specific issues
+  if (account.error_message || account.has_error) {
+    const msg = (account.error_message || '').toLowerCase();
+    
+    // Authentication errors
+    if (msg.includes('authentication') || msg.includes('password') || 
+        msg.includes('credentials') || msg.includes('login') || msg.includes('invalid')) {
+      issues.push({
+        type: 'AUTH_ERROR',
+        severity: 'CRITICAL',
+        message: 'Authentication failed - invalid credentials',
+        details: account.error_message,
+        icon: '🔴'
+      });
+    }
+    // SMTP errors
+    else if (msg.includes('smtp') || msg.includes('connection') || 
+             msg.includes('timeout') || msg.includes('refused')) {
+      issues.push({
+        type: 'SMTP_ERROR',
+        severity: 'CRITICAL',
+        message: 'SMTP connection error',
+        details: account.error_message,
+        icon: '🔴'
+      });
+    }
+    // General sending errors
+    else if (msg.includes('error') || msg.includes('failed') || 
+             msg.includes('blocked') || msg.includes('suspended')) {
+      issues.push({
+        type: 'SENDING_ERROR',
+        severity: 'HIGH',
+        message: 'Sending error detected',
+        details: account.error_message,
+        icon: '⚠️'
+      });
+    }
+  }
+  
+  // 3. Low health score
+  const healthScore = account.health_score || account.warmup_score || 100;
+  if (healthScore < BENCHMARKS.MIN_HEALTH_SCORE && account.statusLabel === 'connected') {
+    const severity: InboxIssueSeverity = healthScore < 85 ? 'HIGH' : 'MEDIUM';
+    issues.push({
+      type: 'LOW_HEALTH',
+      severity,
+      message: `Low health score: ${healthScore}`,
+      details: account.landed_inbox ? `Inbox: ${account.landed_inbox}%, Spam: ${account.landed_spam}%` : undefined,
+      icon: severity === 'HIGH' ? '⚠️' : '🟡'
+    });
+  }
+  
+  // 4. Warmup disabled (only if health is below optimal)
+  if (!account.warmup_enabled && healthScore < 95 && account.statusLabel === 'connected') {
+    issues.push({
+      type: 'WARMUP_DISABLED',
+      severity: 'MEDIUM',
+      message: 'Warmup is paused or disabled',
+      icon: '🟡'
+    });
+  }
+  
+  return issues;
+}
+
+function calculateInboxSeverity(issues: DetectedIssue[]): InboxIssueSeverity {
+  if (issues.length === 0) return 'NONE';
+  const severities = issues.map(i => i.severity);
+  if (severities.includes('CRITICAL')) return 'CRITICAL';
+  if (severities.includes('HIGH')) return 'HIGH';
+  if (severities.includes('MEDIUM')) return 'MEDIUM';
+  return 'LOW';
+}
+
+function generateInboxActions(issues: DetectedIssue[]): InboxAction[] {
+  const actions: InboxAction[] = [];
+  
+  issues.forEach(issue => {
+    switch (issue.type) {
+      case 'DISCONNECTED':
+        actions.push({
+          label: 'Reconnect Account',
+          action: 'reconnect',
+          priority: 'URGENT',
+          steps: [
+            'Go to Instantly.ai → Email Accounts',
+            'Find and click on this account',
+            'Click "Reconnect" or re-authenticate',
+            'Verify connection is successful'
+          ]
+        });
+        break;
+        
+      case 'AUTH_ERROR':
+        actions.push({
+          label: 'Fix Authentication',
+          action: 'fix_auth',
+          priority: 'URGENT',
+          steps: [
+            'Check email password is correct',
+            'Enable IMAP/SMTP access in email settings',
+            'If using 2FA, generate app-specific password',
+            'Reconnect account in Instantly.ai'
+          ]
+        });
+        break;
+        
+      case 'SMTP_ERROR':
+        actions.push({
+          label: 'Fix SMTP Settings',
+          action: 'fix_smtp',
+          priority: 'URGENT',
+          steps: [
+            'Verify SMTP server address',
+            'Check port (usually 587 or 465)',
+            'Confirm SSL/TLS settings match provider',
+            'Test connection from email client first'
+          ]
+        });
+        break;
+        
+      case 'SENDING_ERROR':
+        actions.push({
+          label: 'Resolve Sending Error',
+          action: 'fix_sending',
+          priority: 'HIGH',
+          steps: [
+            'Check if email provider blocked sending',
+            'Verify daily limits not exceeded',
+            'Check for IP/domain reputation issues',
+            'Contact email provider if persistent'
+          ]
+        });
+        break;
+        
+      case 'LOW_HEALTH':
+        actions.push({
+          label: 'Improve Health Score',
+          action: 'improve_health',
+          priority: 'HIGH',
+          steps: [
+            'Resume warmup if paused',
+            'Increase warmup volume gradually',
+            'Check spam folder delivery rate',
+            'Review email content for spam triggers'
+          ]
+        });
+        break;
+        
+      case 'WARMUP_DISABLED':
+        actions.push({
+          label: 'Resume Warmup',
+          action: 'resume_warmup',
+          priority: 'MEDIUM',
+          steps: [
+            'Enable warmup in account settings',
+            'Start with low volume (10-20/day)',
+            'Increase gradually over 2-3 weeks',
+            'Monitor health score improvement'
+          ]
+        });
+        break;
+    }
+  });
+  
+  return actions;
+}
+
 async function handleInboxHealthCommand(forceRefresh: boolean): Promise<TerminalResponse> {
   const cacheKey = terminalCache.getCacheKey('inbox_health', {});
   
@@ -1307,87 +1510,178 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
   
   const data = await instantlyService.getFullAnalytics();
   const accounts = data.accounts || [];
+  const campaigns = data.activeCampaigns || [];
   
-  const disconnected: InboxIssue[] = [];
-  const lowHealth: InboxIssue[] = [];
-  
-  accounts.forEach(account => {
-    if (account.statusLabel === 'disconnected' || account.has_error) {
-      disconnected.push({
-        email: account.email,
-        status: account.statusLabel === 'disconnected' ? 'Disconnected' : 'Error',
-        error: account.error_message,
-        impact: `~${account.daily_limit || 50} sends/day`
-      });
+  // Process each account with detailed issue detection
+  const processedInboxes: ProcessedInbox[] = accounts.map(account => {
+    const issues = detectInboxIssues(account);
+    const severity = calculateInboxSeverity(issues);
+    const actions = generateInboxActions(issues);
+    
+    // Calculate days since last used
+    let daysSinceLastUsed: number | null = null;
+    if (account.last_used) {
+      const lastUsed = new Date(account.last_used);
+      const now = new Date();
+      daysSinceLastUsed = Math.floor((now.getTime() - lastUsed.getTime()) / (1000 * 60 * 60 * 24));
     }
     
-    const healthScore = account.warmup_score || 100;
-    if (healthScore < BENCHMARKS.MIN_HEALTH_SCORE && account.statusLabel === 'connected') {
-      lowHealth.push({
-        email: account.email,
-        status: 'Active but declining',
-        healthScore,
-        landedInbox: 78, // Would need warmup analytics API
-        landedSpam: 22
-      });
+    return {
+      email: account.email,
+      status: account.statusLabel,
+      statusCode: account.status,
+      statusMessage: account.error_message,
+      healthScore: account.health_score || account.warmup_score || null,
+      landedInbox: account.landed_inbox || null,
+      landedSpam: account.landed_spam || null,
+      dailyLimit: account.daily_limit || 50,
+      warmupStatus: account.status,
+      warmupEnabled: account.warmup_enabled,
+      lastUsed: account.last_used,
+      issues,
+      hasIssues: issues.length > 0,
+      severity,
+      affectedCampaigns: [], // Would need campaign-account mapping
+      campaignCount: 0,
+      lostCapacity: issues.length > 0 ? (account.daily_limit || 50) : 0,
+      daysSinceLastUsed,
+      actions
+    };
+  });
+  
+  // Categorize by severity
+  const categorized: CategorizedInboxes = {
+    critical: processedInboxes.filter(i => i.severity === 'CRITICAL'),
+    high: processedInboxes.filter(i => i.severity === 'HIGH'),
+    medium: processedInboxes.filter(i => i.severity === 'MEDIUM'),
+    healthy: processedInboxes.filter(i => i.severity === 'NONE')
+  };
+  
+  // Calculate statistics
+  const issueTypes: Record<InboxIssueType, number> = {
+    'DISCONNECTED': 0,
+    'AUTH_ERROR': 0,
+    'SMTP_ERROR': 0,
+    'SENDING_ERROR': 0,
+    'LOW_HEALTH': 0,
+    'WARMUP_DISABLED': 0
+  };
+  
+  processedInboxes.forEach(inbox => {
+    inbox.issues.forEach(issue => {
+      issueTypes[issue.type]++;
+    });
+  });
+  
+  const stats: InboxHealthStats = {
+    total: accounts.length,
+    healthy: categorized.healthy.length,
+    withIssues: processedInboxes.filter(i => i.hasIssues).length,
+    critical: categorized.critical.length,
+    high: categorized.high.length,
+    medium: categorized.medium.length,
+    totalLostCapacity: processedInboxes.reduce((sum, i) => sum + i.lostCapacity, 0),
+    healthPercentage: accounts.length > 0 
+      ? ((categorized.healthy.length / accounts.length) * 100).toFixed(1)
+      : '100.0',
+    issueTypes
+  };
+  
+  // Build response sections
+  const sections: TerminalSection[] = [];
+  
+  // Summary stats
+  sections.push({
+    title: 'INBOX HEALTH OVERVIEW',
+    type: 'status',
+    status: {
+      label: 'Health Rate',
+      value: `${stats.healthPercentage}%`,
+      icon: parseFloat(stats.healthPercentage) >= 90 ? '✅' : parseFloat(stats.healthPercentage) >= 70 ? '⚠️' : '🔴',
+      change: `${stats.healthy}/${stats.total} healthy`
     }
   });
   
-  const sections: TerminalSection[] = [];
-  
-  if (disconnected.length > 0) {
+  // Critical issues
+  if (categorized.critical.length > 0) {
     sections.push({
-      title: 'DISCONNECTED INBOXES',
+      title: '🔴 CRITICAL ISSUES',
       type: 'list',
-      count: disconnected.length,
-      items: disconnected.slice(0, 10).map(d => ({
-        name: d.email,
+      count: categorized.critical.length,
+      items: categorized.critical.slice(0, 10).map(inbox => ({
+        name: inbox.email,
         details: [
-          `Status: ${d.status}`,
-          d.error ? `Error: ${d.error}` : '',
-          `Impact: ${d.impact}`
+          ...inbox.issues.map(i => `${i.icon} ${i.message}`),
+          inbox.issues[0]?.details ? `Details: ${inbox.issues[0].details}` : '',
+          `Lost: ~${inbox.lostCapacity} sends/day`,
+          inbox.actions[0] ? `Action: ${inbox.actions[0].label}` : ''
         ].filter(Boolean),
-        priority: 'URGENT'
+        priority: 'CRITICAL' as const
       }))
     });
   }
   
-  if (lowHealth.length > 0) {
+  // High priority
+  if (categorized.high.length > 0) {
     sections.push({
-      title: `LOW HEALTH SCORE (<${BENCHMARKS.MIN_HEALTH_SCORE})`,
+      title: '⚠️ HIGH PRIORITY',
       type: 'list',
-      count: lowHealth.length,
-      items: lowHealth.slice(0, 10).map(l => ({
-        name: l.email,
+      count: categorized.high.length,
+      items: categorized.high.slice(0, 10).map(inbox => ({
+        name: inbox.email,
         details: [
-          `Health Score: ${l.healthScore}`,
-          `Status: ${l.status}`
-        ],
-        priority: 'HIGH'
+          ...inbox.issues.map(i => `${i.icon} ${i.message}`),
+          inbox.healthScore ? `Health Score: ${inbox.healthScore}` : '',
+          inbox.landedInbox ? `Inbox: ${inbox.landedInbox}% | Spam: ${inbox.landedSpam}%` : '',
+          inbox.actions[0] ? `Action: ${inbox.actions[0].label}` : ''
+        ].filter(Boolean),
+        priority: 'HIGH' as const
       }))
     });
   }
   
-  const healthyCount = accounts.filter(a => 
-    a.statusLabel === 'connected' && 
-    (a.warmup_score || 100) >= BENCHMARKS.MIN_HEALTH_SCORE
-  ).length;
-  
-  const lostCapacity = disconnected.reduce((sum, d) => {
-    const impact = d.impact?.match(/\d+/);
-    return sum + (impact ? parseInt(impact[0]) : 50);
-  }, 0);
-  
-  if (sections.length === 0) {
+  // Medium priority
+  if (categorized.medium.length > 0) {
     sections.push({
-      title: 'ALL INBOXES HEALTHY',
-      type: 'summary',
-      items: [{
-        name: 'Great work! ✅',
-        details: [`All ${accounts.length} inboxes are connected and healthy.`]
-      }]
+      title: '🟡 MEDIUM PRIORITY',
+      type: 'list',
+      count: categorized.medium.length,
+      items: categorized.medium.slice(0, 5).map(inbox => ({
+        name: inbox.email,
+        details: [
+          ...inbox.issues.map(i => `${i.icon} ${i.message}`),
+          inbox.actions[0] ? `Action: ${inbox.actions[0].label}` : ''
+        ].filter(Boolean),
+        priority: 'MEDIUM' as const
+      }))
     });
   }
+  
+  // Healthy summary
+  sections.push({
+    title: '✅ HEALTHY ACCOUNTS',
+    type: 'summary',
+    status: {
+      label: 'Count',
+      value: categorized.healthy.length,
+      icon: '✅'
+    }
+  });
+  
+  // Issue breakdown
+  const issueBreakdown = Object.entries(issueTypes)
+    .filter(([, count]) => count > 0)
+    .map(([type, count]) => {
+      const labels: Record<string, string> = {
+        'DISCONNECTED': 'Disconnected',
+        'AUTH_ERROR': 'Auth Errors',
+        'SMTP_ERROR': 'SMTP Errors',
+        'SENDING_ERROR': 'Sending Errors',
+        'LOW_HEALTH': 'Low Health',
+        'WARMUP_DISABLED': 'Warmup Disabled'
+      };
+      return `${labels[type] || type}: ${count}`;
+    });
   
   const response: TerminalResponse = {
     type: 'success',
@@ -1396,15 +1690,20 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
     icon: '📧',
     sections,
     summary: [
-      `Disconnected: ${disconnected.length}`,
-      `Low Health: ${lowHealth.length}`,
-      `Healthy: ${healthyCount} ✅`,
-      `Lost Capacity: ~${lostCapacity} emails/day`
+      `**${stats.total}** total inboxes analyzed`,
+      `---`,
+      `🔴 Critical: ${stats.critical}`,
+      `⚠️ High Priority: ${stats.high}`,
+      `🟡 Medium: ${stats.medium}`,
+      `✅ Healthy: ${stats.healthy}`,
+      `---`,
+      `Lost Capacity: ~${stats.totalLostCapacity} emails/day`,
+      ...issueBreakdown
     ],
     metadata: {
       timestamp: 'just now',
       cached: false,
-      issueCount: disconnected.length + lowHealth.length
+      issueCount: stats.withIssues
     }
   };
   

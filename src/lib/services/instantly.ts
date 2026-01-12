@@ -960,7 +960,7 @@ class InstantlyService {
 
   /**
    * Get analytics data - OPTIMIZED for speed
-   * Fetches only first page of each (100 items max) to avoid timeouts
+   * Fetches ALL campaigns but only first page of accounts to prevent timeouts
    */
   async getFullAnalytics(): Promise<{
     campaigns: InstantlyCampaign[];
@@ -971,20 +971,20 @@ class InstantlyService {
     tagMappings: InstantlyTagMapping[];
     error?: string;
   }> {
-    console.log('[Instantly API v2] Fetching data (FAST mode)...');
+    console.log('[Instantly API v2] Fetching data...');
 
-    // Fetch ALL campaigns and accounts using pagination
-    // Use getAllCampaigns for full pagination, others for first page
+    // Fetch ALL campaigns (usually <100) but only first page of accounts
+    // Campaigns are the priority - accounts pagination is too slow
     const [
       allCampaignsRes,
-      allAccountsRes,
+      accountsRes,       // Only first 100 accounts to avoid timeout
       tagsRes,
       tagMappingsRes,
       analyticsRes,
       analyticsOverviewRes,
     ] = await Promise.all([
       this.getAllCampaigns(), // Gets ALL campaigns with pagination
-      this.getAllAccounts(),  // Gets ALL accounts with pagination
+      this.getAccounts({ limit: 100 }),  // First 100 accounts only for speed
       this.getCustomTags(),
       this.getCustomTagMappings({}),
       this.getCampaignAnalytics({ exclude_total_leads_count: false }),
@@ -992,7 +992,7 @@ class InstantlyService {
     ]);
 
     const allCampaigns = allCampaignsRes.data || [];
-    const accounts = allAccountsRes.data || [];
+    const accounts = accountsRes.data || [];
     const tags = tagsRes.data || [];
     const tagMappings = tagMappingsRes.data || [];
 
@@ -1095,7 +1095,7 @@ class InstantlyService {
 
     const errors = [
       allCampaignsRes.error,
-      allAccountsRes.error,
+      accountsRes.error,
       tagsRes.error,
       tagMappingsRes.error,
       analyticsRes.error,
@@ -1109,6 +1109,43 @@ class InstantlyService {
       tags,
       tagMappings,
       error: errors || undefined,
+    };
+  }
+
+  /**
+   * Get ALL accounts - specifically for inbox health command
+   * This is slower but necessary to see all inboxes
+   */
+  async getFullAccountsData(): Promise<{
+    accounts: InstantlyAccount[];
+    tags: InstantlyCustomTag[];
+    error?: string;
+  }> {
+    console.log('[Instantly API v2] Fetching ALL accounts for inbox health...');
+    
+    const [allAccountsRes, tagsRes] = await Promise.all([
+      this.getAllAccounts(),
+      this.getCustomTags(),
+    ]);
+    
+    const accounts = allAccountsRes.data || [];
+    const tags = tagsRes.data || [];
+    
+    console.log(`[Instantly API v2] Total accounts: ${accounts.length}, Tags: ${tags.length}`);
+    
+    // Create tag lookup
+    const tagMap = new Map(tags.map(t => [t.id, t.name]));
+    
+    // Enrich accounts with tags
+    const enrichedAccounts = accounts.map(account => ({
+      ...account,
+      tags: (account as any).tag_ids?.map((id: string) => tagMap.get(id)).filter(Boolean) || [],
+    }));
+    
+    return {
+      accounts: enrichedAccounts,
+      tags,
+      error: allAccountsRes.error || tagsRes.error,
     };
   }
 }

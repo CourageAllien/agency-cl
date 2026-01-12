@@ -321,7 +321,35 @@ async function handleCampaignListCommand(forceRefresh: boolean): Promise<Termina
     }
   }
   
-  const data = await instantlyService.getFullAnalytics();
+  let data;
+  try {
+    console.log('[Terminal] Fetching campaign data from Instantly API...');
+    data = await instantlyService.getFullAnalytics();
+    console.log(`[Terminal] Received ${data.activeCampaigns?.length || 0} active campaigns`);
+  } catch (error) {
+    console.error('[Terminal] Error fetching campaign data:', error);
+    return {
+      type: 'error',
+      command: 'campaigns',
+      title: 'Connection Error',
+      icon: '❌',
+      sections: [{
+        title: 'ERROR',
+        type: 'summary',
+        items: [{
+          name: 'Failed to fetch campaigns',
+          details: [
+            'Unable to connect to Instantly API.',
+            error instanceof Error ? error.message : 'Unknown error',
+            'Please try again in a few moments.'
+          ]
+        }]
+      }],
+      summary: ['Connection failed - please retry'],
+      metadata: { timestamp: 'just now', cached: false }
+    };
+  }
+  
   const activeCampaigns = data.activeCampaigns || [];
   
   // Process each campaign
@@ -1515,9 +1543,42 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
     }
   }
   
-  const data = await instantlyService.getFullAnalytics();
-  const accounts = data.accounts || [];
-  const campaigns = data.activeCampaigns || [];
+  let accountData;
+  let campaignData;
+  try {
+    console.log('[Terminal] Fetching ALL inbox data from Instantly API...');
+    // Use the dedicated method for fetching all accounts
+    [accountData, campaignData] = await Promise.all([
+      instantlyService.getFullAccountsData(),
+      instantlyService.getFullAnalytics()
+    ]);
+    console.log(`[Terminal] Received ${accountData.accounts?.length || 0} accounts`);
+  } catch (error) {
+    console.error('[Terminal] Error fetching inbox data:', error);
+    return {
+      type: 'error',
+      command: 'inbox_health',
+      title: 'Connection Error',
+      icon: '❌',
+      sections: [{
+        title: 'ERROR',
+        type: 'summary',
+        items: [{
+          name: 'Failed to fetch inboxes',
+          details: [
+            'Unable to connect to Instantly API.',
+            error instanceof Error ? error.message : 'Unknown error',
+            'Please try again in a few moments.'
+          ]
+        }]
+      }],
+      summary: ['Connection failed - please retry'],
+      metadata: { timestamp: 'just now', cached: false }
+    };
+  }
+  
+  const accounts = accountData.accounts || [];
+  const campaigns = campaignData.activeCampaigns || [];
   
   // Process each account with detailed issue detection
   const processedInboxes: ProcessedInbox[] = accounts.map(account => {

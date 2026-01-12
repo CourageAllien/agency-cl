@@ -6,6 +6,9 @@
   "functions": {
     "src/app/api/dashboard/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/terminal/route.ts": {
+      "maxDuration": 60
     }
   }
 }

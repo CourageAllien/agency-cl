@@ -475,14 +475,19 @@ class InstantlyService {
 
   async getAccounts(params?: { limit?: number; search?: string; tag_ids?: string }): Promise<InstantlyApiResponse<InstantlyAccount[]>> {
     const query = new URLSearchParams();
+    // Note: v2 API uses 'limit' parameter
     if (params?.limit) query.set('limit', String(params.limit));
     if (params?.search) query.set('search', params.search);
     if (params?.tag_ids) query.set('tag_ids', params.tag_ids);
 
     const endpoint = `/accounts${query.toString() ? `?${query}` : ''}`;
+    console.log(`[Instantly API v2] Fetching accounts: ${endpoint}`);
     const response = await this.request<unknown>(endpoint);
     
-    if (response.error) return { error: response.error, status: response.status };
+    if (response.error) {
+      console.error(`[Instantly API v2] Accounts error: ${response.error} (status: ${response.status})`);
+      return { error: response.error, status: response.status };
+    }
 
     const rawAccounts = this.extractArray<RawAccount>(response.data);
     console.log(`[Instantly API v2] Found ${rawAccounts.length} accounts`);
@@ -648,7 +653,7 @@ class InstantlyService {
       this.getCampaigns({ limit: 100 }),
       this.getCampaignAnalytics({ exclude_total_leads_count: false }),
       this.getCampaignAnalyticsOverview({ expand_crm_events: false }),
-      this.getAccounts({ limit: 200 }),
+      this.getAccounts({ limit: 100 }),
       this.getCustomTags(),
       this.getCustomTagMappings(),
     ]);

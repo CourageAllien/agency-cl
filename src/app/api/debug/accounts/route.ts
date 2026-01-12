@@ -10,7 +10,18 @@ export async function GET() {
   try {
     console.log('[Debug Accounts] Starting accounts fetch...');
     
-    const accountsRes = await instantlyService.getAccounts({ limit: 200 });
+    // Try different limits
+    let accountsRes = await instantlyService.getAccounts({ limit: 100 });
+    
+    if (accountsRes.error) {
+      console.log('[Debug Accounts] limit 100 failed, trying 50...');
+      accountsRes = await instantlyService.getAccounts({ limit: 50 });
+    }
+    
+    if (accountsRes.error) {
+      console.log('[Debug Accounts] limit 50 failed, trying no limit...');
+      accountsRes = await instantlyService.getAccounts({});
+    }
     
     console.log('[Debug Accounts] Response:', {
       error: accountsRes.error,

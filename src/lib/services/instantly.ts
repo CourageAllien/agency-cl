@@ -406,7 +406,7 @@ class InstantlyService {
    */
   private async fetchAllPages<T>(
     fetchPage: (cursor?: string) => Promise<InstantlyApiResponse<unknown>>,
-    maxPages: number = 50 // Safety limit
+    maxPages: number = 5 // Limit to 5 pages (500 items max) for speed
   ): Promise<{ data: T[]; error?: string }> {
     const allItems: T[] = [];
     let cursor: string | undefined;

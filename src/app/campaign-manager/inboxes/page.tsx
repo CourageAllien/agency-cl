@@ -53,7 +53,8 @@ export default function InboxesPage() {
     return accounts.filter((account) => {
       const matchesSearch =
         account.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        account.clientName.toLowerCase().includes(searchQuery.toLowerCase());
+        account.provider.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        account.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
       
       const matchesStatus =
         statusFilter === "all" ||
@@ -314,7 +315,7 @@ export default function InboxesPage() {
                     <div>
                       <div className="font-medium text-foreground">{account.email}</div>
                       <div className="text-sm text-muted-foreground">
-                        {account.clientName} • {account.provider}
+                        {account.provider}{account.tags.length > 0 && ` • ${account.tags[0]}`}
                       </div>
                     </div>
                   </div>

@@ -12,26 +12,29 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
+    console.log('[Dashboard] Fetching ALL data (no limits)...');
+
     // Fetch all data using the comprehensive getFullAnalytics method
-    // This fetches: campaigns, analytics, analytics overview, accounts, warmup analytics, tags, tag mappings
+    // This fetches ALL campaigns, accounts, tags, tag mappings (paginated)
     const fullData = await instantlyService.getFullAnalytics();
 
     if (fullData.error) {
       console.error('[Dashboard] Instantly API error:', fullData.error);
     }
 
-    const { campaigns, analytics, accounts, tags, tagMappings } = fullData;
+    const { campaigns, activeCampaigns, analytics, accounts, tags, tagMappings } = fullData;
 
-    console.log(`[Dashboard] Processing ${campaigns.length} campaigns`);
-    console.log(`[Dashboard] Processing ${accounts.length} accounts`);
-    console.log(`[Dashboard] Processing ${tags.length} tags`);
-    console.log(`[Dashboard] Processing ${tagMappings.length} tag mappings`);
+    console.log(`[Dashboard] Total campaigns: ${campaigns.length}`);
+    console.log(`[Dashboard] ACTIVE campaigns: ${activeCampaigns.length}`);
+    console.log(`[Dashboard] Total accounts: ${accounts.length}`);
+    console.log(`[Dashboard] Total tags: ${tags.length}`);
+    console.log(`[Dashboard] Total tag mappings: ${tagMappings.length}`);
 
     // Log sample data for debugging
-    if (campaigns.length > 0 && campaigns[0].analytics) {
-      const sample = campaigns[0].analytics;
-      console.log(`[Dashboard] Sample analytics:`, {
-        campaign: campaigns[0].name,
+    if (activeCampaigns.length > 0 && activeCampaigns[0].analytics) {
+      const sample = activeCampaigns[0].analytics;
+      console.log(`[Dashboard] Sample ACTIVE campaign analytics:`, {
+        campaign: activeCampaigns[0].name,
         sent: sample.sent,
         replies: sample.unique_replies,
         interested: sample.total_interested,
@@ -42,13 +45,15 @@ export async function GET() {
     }
 
     // Transform data into app format
-    const clients = transformCampaignsToClients(campaigns);
-    const transformedAccounts = transformAccounts(accounts, clients);
+    // Uses ACTIVE campaigns for classification, ALL campaigns for lifetime metrics
+    const clients = transformCampaignsToClients(campaigns, activeCampaigns);
+    const transformedAccounts = transformAccounts(accounts);
     const portfolioMetrics = calculatePortfolioMetrics(clients, transformedAccounts);
     const tasks = generateTasksFromClassifications(clients);
 
-    // Calculate bucket distribution
-    const bucketDistribution = clients.reduce((acc, client) => {
+    // Calculate bucket distribution (based on clients with active campaigns)
+    const activeClients = clients.filter(c => c.metrics.activeCampaignCount > 0);
+    const bucketDistribution = activeClients.reduce((acc, client) => {
       acc[client.classification.bucket] = (acc[client.classification.bucket] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
@@ -61,9 +66,10 @@ export async function GET() {
       warmup: transformedAccounts.filter(a => a.status === 'warmup').length,
       avgHealth: portfolioMetrics.avgInboxHealth,
       lowHealth: transformedAccounts.filter(a => a.healthScore < 70).length,
+      withErrors: transformedAccounts.filter(a => a.sendingError).length,
     };
 
-    // All unique tags - get from both the tags API and accounts
+    // All unique tags
     const tagsFromApi = tags.map(t => t.name).filter(Boolean);
     const tagsFromAccounts = transformedAccounts.flatMap(a => a.tags);
     const allTags = Array.from(new Set([...tagsFromApi, ...tagsFromAccounts])).sort();
@@ -71,15 +77,20 @@ export async function GET() {
     // Build response
     const response = {
       clients,
+      activeClients,
       accounts: transformedAccounts,
-      portfolioMetrics,
+      portfolioMetrics: {
+        ...portfolioMetrics,
+        totalCampaigns: campaigns.length,
+        activeCampaigns: activeCampaigns.length,
+      },
       tasks,
       bucketDistribution,
       inboxHealth,
       tags,
       tagMappings,
       allTags,
-      // Aggregated analytics summary
+      // Aggregated analytics summary (from active campaigns only)
       analyticsSummary: {
         totalSent: analytics.reduce((sum, a) => sum + (a.sent || 0), 0),
         totalReplies: analytics.reduce((sum, a) => sum + (a.unique_replies || 0), 0),
@@ -91,9 +102,11 @@ export async function GET() {
           : 0,
       },
       meta: {
-        campaignCount: campaigns.length,
+        totalCampaignCount: campaigns.length,
+        activeCampaignCount: activeCampaigns.length,
         accountCount: accounts.length,
         clientCount: clients.length,
+        activeClientCount: activeClients.length,
         analyticsCount: analytics.length,
         tagCount: tags.length,
         lastUpdated: new Date().toISOString(),

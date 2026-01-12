@@ -2,16 +2,31 @@
  * Instantly API v2 Service
  * Complete implementation based on official API documentation
  * https://developer.instantly.ai/
+ * 
+ * KEY RULES:
+ * - Focus on ACTIVE campaigns (status=1) for classification
+ * - No limits - paginate to fetch ALL data
+ * - Inboxes are NOT clients - never derive client name from email
+ * - "Interd" campaigns = "Interdependence" client
  */
 
 // Trim any whitespace/newlines from the API key
 const INSTANTLY_API_KEY = (process.env.INSTANTLY_API_KEY || '').trim();
 const INSTANTLY_API_BASE_URL = 'https://api.instantly.ai/api/v2';
 
+// Campaign status constants
+const CAMPAIGN_STATUS = {
+  ACTIVE: 1,
+  PAUSED: 0,
+  DRAFT: 2,
+  COMPLETED: 3,
+} as const;
+
 interface InstantlyApiResponse<T> {
   data?: T;
   error?: string;
   status: number;
+  nextStartingAfter?: string;
 }
 
 // ============ TYPE DEFINITIONS ============
@@ -141,7 +156,7 @@ interface WarmupAggregateStats {
 interface RawCustomTag {
   id: string;
   name?: string;
-  label?: string; // Some APIs use label instead of name
+  label?: string;
   color?: string;
   timestamp_created?: string;
 }
@@ -150,7 +165,7 @@ interface RawTagMapping {
   id: string;
   tag_id: string;
   resource_id: string;
-  resource_type: 'account' | 'campaign' | number; // API returns numeric: 1=account, 2=campaign
+  resource_type: 'account' | 'campaign' | number;
 }
 
 // Lead Types
@@ -161,7 +176,7 @@ interface RawLead {
   last_name?: string;
   company_name?: string;
   website?: string;
-  status: number; // 0=not contacted, 1=contacted
+  status: number;
   interest_status?: string;
   campaign?: string;
   list_id?: string;
@@ -176,6 +191,7 @@ export interface InstantlyCampaign {
   name: string;
   status: number;
   statusLabel: string;
+  isActive: boolean;
   timestamp_created?: string;
   timestamp_updated?: string;
   dailyLimit?: number;
@@ -288,6 +304,15 @@ const PROVIDER_CODE_MAP: Record<number, string> = {
   4: 'Other',
 };
 
+// ============ CLIENT NAME MAPPINGS ============
+// Map campaign name patterns to actual client names
+const CLIENT_NAME_MAPPINGS: Record<string, string> = {
+  'interd': 'Interdependence',
+  'interdr': 'Interdependence',
+  'interdependence': 'Interdependence',
+  // Add more mappings as needed
+};
+
 // ============ SERVICE CLASS ============
 
 class InstantlyService {
@@ -331,14 +356,22 @@ class InstantlyService {
       }
 
       let data: T;
+      let nextStartingAfter: string | undefined;
+      
       try {
-        data = JSON.parse(responseText);
+        const parsed = JSON.parse(responseText);
+        data = parsed;
+        
+        // Check for pagination cursor
+        if (parsed && typeof parsed === 'object') {
+          nextStartingAfter = parsed.next_starting_after;
+        }
       } catch {
         console.error('[Instantly API v2] Failed to parse JSON');
         return { error: 'Invalid JSON response', status: 500 };
       }
 
-      return { data, status: response.status };
+      return { data, status: response.status, nextStartingAfter };
     } catch (error) {
       console.error('[Instantly API v2] Fetch error:', error);
       return {
@@ -358,15 +391,66 @@ class InstantlyService {
     return [];
   }
 
+  private getNextCursor(data: unknown): string | undefined {
+    if (data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>;
+      return obj.next_starting_after as string | undefined;
+    }
+    return undefined;
+  }
+
+  // ============ PAGINATION HELPER ============
+  
+  /**
+   * Fetch all pages of a paginated endpoint
+   */
+  private async fetchAllPages<T>(
+    fetchPage: (cursor?: string) => Promise<InstantlyApiResponse<unknown>>,
+    maxPages: number = 50 // Safety limit
+  ): Promise<{ data: T[]; error?: string }> {
+    const allItems: T[] = [];
+    let cursor: string | undefined;
+    let pageCount = 0;
+
+    while (pageCount < maxPages) {
+      const response = await fetchPage(cursor);
+      
+      if (response.error) {
+        return { data: allItems, error: response.error };
+      }
+
+      const items = this.extractArray<T>(response.data);
+      allItems.push(...items);
+      
+      cursor = this.getNextCursor(response.data);
+      pageCount++;
+
+      console.log(`[Instantly API v2] Page ${pageCount}: ${items.length} items (total: ${allItems.length})`);
+
+      if (!cursor || items.length === 0) {
+        break; // No more pages
+      }
+    }
+
+    return { data: allItems };
+  }
+
   // ============ CAMPAIGNS ============
 
-  async getCampaigns(params?: { status?: number; limit?: number; tag_ids?: string }): Promise<InstantlyApiResponse<InstantlyCampaign[]>> {
+  async getCampaigns(params?: { 
+    status?: number; 
+    limit?: number; 
+    starting_after?: string;
+    tag_ids?: string;
+  }): Promise<InstantlyApiResponse<InstantlyCampaign[]>> {
     const query = new URLSearchParams();
+    // Default to high limit
+    query.set('limit', String(params?.limit || 100));
     if (params?.status !== undefined) query.set('status', String(params.status));
-    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
     if (params?.tag_ids) query.set('tag_ids', params.tag_ids);
 
-    const endpoint = `/campaigns${query.toString() ? `?${query}` : ''}`;
+    const endpoint = `/campaigns?${query}`;
     const response = await this.request<unknown>(endpoint);
     
     if (response.error) return { error: response.error, status: response.status };
@@ -379,12 +463,47 @@ class InstantlyService {
       name: raw.name,
       status: raw.status,
       statusLabel: CAMPAIGN_STATUS_MAP[raw.status] || 'unknown',
+      isActive: raw.status === CAMPAIGN_STATUS.ACTIVE,
       timestamp_created: raw.timestamp_created,
       timestamp_updated: raw.timestamp_updated,
       dailyLimit: raw.daily_limit,
     }));
 
-    return { data: campaigns, status: response.status };
+    return { 
+      data: campaigns, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  /**
+   * Fetch ALL campaigns (paginated)
+   */
+  async getAllCampaigns(): Promise<{ data: InstantlyCampaign[]; error?: string }> {
+    const result = await this.fetchAllPages<InstantlyCampaign>(
+      async (cursor) => {
+        const query = new URLSearchParams();
+        query.set('limit', '100');
+        if (cursor) query.set('starting_after', cursor);
+        
+        const response = await this.request<unknown>(`/campaigns?${query}`);
+        return response;
+      }
+    );
+
+    // Convert raw to InstantlyCampaign
+    const campaigns = result.data.map((raw: any) => ({
+      id: raw.id,
+      name: raw.name,
+      status: raw.status,
+      statusLabel: CAMPAIGN_STATUS_MAP[raw.status] || 'unknown',
+      isActive: raw.status === CAMPAIGN_STATUS.ACTIVE,
+      timestamp_created: raw.timestamp_created,
+      timestamp_updated: raw.timestamp_updated,
+      dailyLimit: raw.daily_limit,
+    }));
+
+    return { data: campaigns, error: result.error };
   }
 
   // ============ CAMPAIGN ANALYTICS ============
@@ -474,14 +593,20 @@ class InstantlyService {
 
   // ============ ACCOUNTS ============
 
-  async getAccounts(params?: { limit?: number; search?: string; tag_ids?: string }): Promise<InstantlyApiResponse<InstantlyAccount[]>> {
+  async getAccounts(params?: { 
+    limit?: number; 
+    search?: string; 
+    tag_ids?: string;
+    starting_after?: string;
+  }): Promise<InstantlyApiResponse<InstantlyAccount[]>> {
     const query = new URLSearchParams();
-    // Note: v2 API uses 'limit' parameter
-    if (params?.limit) query.set('limit', String(params.limit));
+    // Use max limit of 100 (200 causes 400 error)
+    query.set('limit', String(params?.limit || 100));
     if (params?.search) query.set('search', params.search);
     if (params?.tag_ids) query.set('tag_ids', params.tag_ids);
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
 
-    const endpoint = `/accounts${query.toString() ? `?${query}` : ''}`;
+    const endpoint = `/accounts?${query}`;
     console.log(`[Instantly API v2] Fetching accounts: ${endpoint}`);
     const response = await this.request<unknown>(endpoint);
     
@@ -514,7 +639,7 @@ class InstantlyService {
         provider_code: raw.provider_code || 0,
         providerLabel: PROVIDER_CODE_MAP[raw.provider_code || 0] || 'Unknown',
         warmup_score: raw.stat_warmup_score || 0,
-        health_score: raw.stat_warmup_score || 0, // Will be updated by warmup analytics
+        health_score: raw.stat_warmup_score || 0,
         health_score_label: `${raw.stat_warmup_score || 0}%`,
         landed_inbox: 0,
         landed_spam: 0,
@@ -525,7 +650,46 @@ class InstantlyService {
       };
     });
 
-    return { data: accounts, status: response.status };
+    return { 
+      data: accounts, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  /**
+   * Fetch ALL accounts (paginated)
+   */
+  async getAllAccounts(): Promise<{ data: InstantlyAccount[]; error?: string }> {
+    const allAccounts: InstantlyAccount[] = [];
+    let cursor: string | undefined;
+    let pageCount = 0;
+    const maxPages = 50;
+
+    while (pageCount < maxPages) {
+      const response = await this.getAccounts({ 
+        limit: 100,
+        starting_after: cursor,
+      });
+      
+      if (response.error) {
+        return { data: allAccounts, error: response.error };
+      }
+
+      const accounts = response.data || [];
+      allAccounts.push(...accounts);
+      
+      cursor = response.nextStartingAfter;
+      pageCount++;
+
+      console.log(`[Instantly API v2] Accounts page ${pageCount}: ${accounts.length} (total: ${allAccounts.length})`);
+
+      if (!cursor || accounts.length === 0) {
+        break;
+      }
+    }
+
+    return { data: allAccounts };
   }
 
   async getWarmupAnalytics(emails: string[]): Promise<InstantlyApiResponse<RawWarmupAnalytics>> {
@@ -539,34 +703,80 @@ class InstantlyService {
 
   // ============ CUSTOM TAGS ============
 
-  async getCustomTags(): Promise<InstantlyApiResponse<InstantlyCustomTag[]>> {
-    const response = await this.request<unknown>('/custom-tags');
+  async getCustomTags(params?: { starting_after?: string }): Promise<InstantlyApiResponse<InstantlyCustomTag[]>> {
+    const query = new URLSearchParams();
+    query.set('limit', '100');
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
+
+    const endpoint = `/custom-tags?${query}`;
+    const response = await this.request<unknown>(endpoint);
     
     if (response.error) return { error: response.error, status: response.status };
     
     const raw = this.extractArray<RawCustomTag>(response.data);
     console.log(`[Instantly API v2] Found ${raw.length} custom tags`);
     
-    // Log first tag for debugging
     if (raw.length > 0) {
       console.log(`[Instantly API v2] Sample tag:`, JSON.stringify(raw[0]));
     }
     
     const tags: InstantlyCustomTag[] = raw.map(t => ({
       id: t.id,
-      name: t.name || t.label || t.id, // Fallback to id if no name
+      name: t.name || t.label || t.id,
       color: t.color,
     }));
     
-    return { data: tags, status: response.status };
+    return { 
+      data: tags, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
   }
 
-  async getCustomTagMappings(params?: { tag_id?: string; resource_type?: 'account' | 'campaign' }): Promise<InstantlyApiResponse<InstantlyTagMapping[]>> {
+  /**
+   * Fetch ALL tags (paginated)
+   */
+  async getAllCustomTags(): Promise<{ data: InstantlyCustomTag[]; error?: string }> {
+    const allTags: InstantlyCustomTag[] = [];
+    let cursor: string | undefined;
+    let pageCount = 0;
+    const maxPages = 20;
+
+    while (pageCount < maxPages) {
+      const response = await this.getCustomTags({ starting_after: cursor });
+      
+      if (response.error) {
+        return { data: allTags, error: response.error };
+      }
+
+      const tags = response.data || [];
+      allTags.push(...tags);
+      
+      cursor = response.nextStartingAfter;
+      pageCount++;
+
+      console.log(`[Instantly API v2] Tags page ${pageCount}: ${tags.length} (total: ${allTags.length})`);
+
+      if (!cursor || tags.length === 0) {
+        break;
+      }
+    }
+
+    return { data: allTags };
+  }
+
+  async getCustomTagMappings(params?: { 
+    tag_id?: string; 
+    resource_type?: 'account' | 'campaign';
+    starting_after?: string;
+  }): Promise<InstantlyApiResponse<InstantlyTagMapping[]>> {
     const query = new URLSearchParams();
+    query.set('limit', '100');
     if (params?.tag_id) query.set('tag_id', params.tag_id);
     if (params?.resource_type) query.set('resource_type', params.resource_type);
+    if (params?.starting_after) query.set('starting_after', params.starting_after);
 
-    const endpoint = `/custom-tag-mappings${query.toString() ? `?${query}` : ''}`;
+    const endpoint = `/custom-tag-mappings?${query}`;
     const response = await this.request<unknown>(endpoint);
     
     if (response.error) return { error: response.error, status: response.status };
@@ -574,12 +784,10 @@ class InstantlyService {
     const raw = this.extractArray<RawTagMapping>(response.data);
     console.log(`[Instantly API v2] Found ${raw.length} tag mappings`);
     
-    // Log first mapping for debugging
     if (raw.length > 0) {
       console.log(`[Instantly API v2] Sample tag mapping:`, JSON.stringify(raw[0]));
     }
     
-    // Convert numeric resource_type to string: 1=account, 2=campaign
     const mappings: InstantlyTagMapping[] = raw.map(m => {
       let resourceType: 'account' | 'campaign';
       if (typeof m.resource_type === 'number') {
@@ -596,7 +804,43 @@ class InstantlyService {
       };
     });
     
-    return { data: mappings, status: response.status };
+    return { 
+      data: mappings, 
+      status: response.status,
+      nextStartingAfter: this.getNextCursor(response.data),
+    };
+  }
+
+  /**
+   * Fetch ALL tag mappings (paginated)
+   */
+  async getAllTagMappings(): Promise<{ data: InstantlyTagMapping[]; error?: string }> {
+    const allMappings: InstantlyTagMapping[] = [];
+    let cursor: string | undefined;
+    let pageCount = 0;
+    const maxPages = 50;
+
+    while (pageCount < maxPages) {
+      const response = await this.getCustomTagMappings({ starting_after: cursor });
+      
+      if (response.error) {
+        return { data: allMappings, error: response.error };
+      }
+
+      const mappings = response.data || [];
+      allMappings.push(...mappings);
+      
+      cursor = response.nextStartingAfter;
+      pageCount++;
+
+      console.log(`[Instantly API v2] Tag mappings page ${pageCount}: ${mappings.length} (total: ${allMappings.length})`);
+
+      if (!cursor || mappings.length === 0) {
+        break;
+      }
+    }
+
+    return { data: allMappings };
   }
 
   // ============ LEADS ============
@@ -652,45 +896,118 @@ class InstantlyService {
   }
 
   /**
-   * Get complete analytics data with all endpoints merged
+   * Extract client name from campaign name
+   * IMPORTANT: Never use inbox email as client name
+   */
+  extractClientName(campaignName: string): string {
+    let name = campaignName.toLowerCase().trim();
+    
+    // Check for known client name mappings FIRST
+    for (const [pattern, clientName] of Object.entries(CLIENT_NAME_MAPPINGS)) {
+      if (name.includes(pattern)) {
+        return clientName;
+      }
+    }
+
+    // Now clean up the campaign name
+    name = campaignName;
+    
+    // Remove common prefixes
+    name = name.replace(/^\(barracuda\)\s*/i, '');
+    name = name.replace(/^\(baracuda\)\s*/i, '');
+    
+    // Remove common suffixes
+    name = name.replace(/\s*-\s*RR.*$/i, '');
+    name = name.replace(/\s*RR\s+.*$/i, '');
+    name = name.replace(/\s*V\d+.*$/i, '');
+    name = name.replace(/\s*Trial.*$/i, '');
+    name = name.replace(/\s*Rerun.*$/i, '');
+    name = name.replace(/\s*\(copy\).*$/i, '');
+    name = name.replace(/\s*Recycled.*$/i, '');
+    name = name.replace(/\s*Final\s+Consumer.*$/i, '');
+    name = name.replace(/\s+Run$/i, '');
+    name = name.replace(/\s+rewarm$/i, '');
+    
+    // Try to extract from patterns
+    const patterns = [
+      /^(.+?)\s*[-–—|]\s*/,
+      /^\[(.+?)\]\s*/,
+      /^(.+?):\s*/,
+    ];
+
+    for (const pattern of patterns) {
+      const match = name.match(pattern);
+      if (match) {
+        name = match[1].trim();
+        break;
+      }
+    }
+
+    // If name looks like an email, this is wrong - use first word of campaign
+    if (name.includes('@')) {
+      const words = campaignName.trim().split(/\s+/);
+      name = words[0];
+    }
+
+    // Use first 2-3 meaningful words as the client name
+    const words = name.trim().split(/\s+/).filter(w => w.length > 1);
+    if (words.length >= 2) {
+      return words.slice(0, 2).join(' ');
+    }
+    
+    return name.trim() || campaignName;
+  }
+
+  /**
+   * Get complete analytics data with ALL data fetched (no limits)
+   * Focuses on ACTIVE campaigns for classification
    */
   async getFullAnalytics(): Promise<{
     campaigns: InstantlyCampaign[];
+    activeCampaigns: InstantlyCampaign[];
     analytics: InstantlyCampaignAnalytics[];
     accounts: InstantlyAccount[];
     tags: InstantlyCustomTag[];
     tagMappings: InstantlyTagMapping[];
     error?: string;
   }> {
-    // Fetch all data in parallel
+    console.log('[Instantly API v2] Fetching ALL data (no limits)...');
+
+    // Fetch all data in parallel using pagination
     const [
-      campaignsRes,
-      analyticsRes,
-      analyticsOverviewRes,
-      accountsRes,
-      tagsRes,
-      tagMappingsRes,
+      campaignsResult,
+      accountsResult,
+      tagsResult,
+      tagMappingsResult,
     ] = await Promise.all([
-      this.getCampaigns({ limit: 100 }),
-      this.getCampaignAnalytics({ exclude_total_leads_count: false }),
-      this.getCampaignAnalyticsOverview({ expand_crm_events: false }),
-      this.getAccounts({ limit: 100 }),
-      this.getCustomTags(),
-      this.getCustomTagMappings(),
+      this.getAllCampaigns(),
+      this.getAllAccounts(),
+      this.getAllCustomTags(),
+      this.getAllTagMappings(),
     ]);
 
-    const campaigns = campaignsRes.data || [];
+    const allCampaigns = campaignsResult.data || [];
+    const accounts = accountsResult.data || [];
+    const tags = tagsResult.data || [];
+    const tagMappings = tagMappingsResult.data || [];
+
+    console.log(`[Instantly API v2] Total campaigns: ${allCampaigns.length}`);
+    console.log(`[Instantly API v2] Total accounts: ${accounts.length}`);
+    console.log(`[Instantly API v2] Total tags: ${tags.length}`);
+    console.log(`[Instantly API v2] Total tag mappings: ${tagMappings.length}`);
+
+    // Filter to ACTIVE campaigns only for classification
+    const activeCampaigns = allCampaigns.filter(c => c.isActive);
+    console.log(`[Instantly API v2] ACTIVE campaigns: ${activeCampaigns.length}`);
+
+    // Now fetch analytics for all campaigns
+    const [analyticsRes, analyticsOverviewRes] = await Promise.all([
+      this.getCampaignAnalytics({ exclude_total_leads_count: false }),
+      this.getCampaignAnalyticsOverview({ expand_crm_events: false }),
+    ]);
+
     const rawAnalytics = analyticsRes.data || [];
     const rawOverview = analyticsOverviewRes.data || [];
-    const accounts = accountsRes.data || [];
-    const tags = tagsRes.data || [];
-    const tagMappings = tagMappingsRes.data || [];
-
-    // Debug logging
-    console.log(`[Instantly getFullAnalytics] Campaigns: ${campaigns.length}, Analytics: ${rawAnalytics.length}, Accounts: ${accounts.length}, Tags: ${tags.length}`);
-    if (accountsRes.error) {
-      console.error('[Instantly getFullAnalytics] Accounts error:', accountsRes.error);
-    }
 
     // Create lookup maps
     const overviewMap = new Map(rawOverview.map(o => [o.campaign_id, o]));
@@ -706,7 +1023,6 @@ class InstantlyService {
       const totalMeetingBooked = overview?.total_meeting_booked || 0;
       const totalOpportunities = raw.total_opportunities || 0;
 
-      // Calculate rates
       const replyRate = sent > 0 ? (uniqueReplies / sent) * 100 : 0;
       const conversionRate = uniqueReplies > 0 ? (totalOpportunities / uniqueReplies) * 100 : 0;
       const positiveReplyRate = uniqueReplies > 0 ? (totalInterested / uniqueReplies) * 100 : 0;
@@ -731,7 +1047,7 @@ class InstantlyService {
         conversion_rate: Number(conversionRate.toFixed(2)),
         positive_reply_rate: Number(positiveReplyRate.toFixed(2)),
         pos_reply_to_meeting: Number(posReplyToMeeting.toFixed(2)),
-        // Legacy field names for compatibility
+        // Legacy fields
         total_sent: sent,
         total_opened: raw.unique_opened || 0,
         total_replied: uniqueReplies,
@@ -745,7 +1061,13 @@ class InstantlyService {
 
     // Merge campaigns with analytics
     const analyticsMap = new Map(analytics.map(a => [a.campaign_id, a]));
-    const campaignsWithAnalytics = campaigns.map(campaign => ({
+    const campaignsWithAnalytics = allCampaigns.map(campaign => ({
+      ...campaign,
+      analytics: analyticsMap.get(campaign.id),
+    }));
+
+    // Active campaigns with analytics
+    const activeCampaignsWithAnalytics = activeCampaigns.map(campaign => ({
       ...campaign,
       analytics: analyticsMap.get(campaign.id),
     }));
@@ -762,75 +1084,54 @@ class InstantlyService {
       };
     });
 
-    // Fetch warmup analytics for health scores (optional - don't fail if this doesn't work)
+    // Fetch warmup analytics for health scores (optional)
     if (accounts.length > 0) {
       try {
-        const emails = accounts.map(a => a.email);
-        const warmupRes = await this.getWarmupAnalytics(emails);
-        
-        if (warmupRes.data?.aggregate_data) {
-          enrichedAccounts.forEach(account => {
-            const warmup = warmupRes.data?.aggregate_data[account.email];
-            if (warmup) {
-              account.health_score = warmup.health_score || account.warmup_score;
-              account.health_score_label = warmup.health_score_label || `${account.warmup_score}%`;
-              account.landed_inbox = warmup.landed_inbox || 0;
-              account.landed_spam = warmup.landed_spam || 0;
-            }
-          });
+        // Batch in groups of 100
+        const batches = [];
+        for (let i = 0; i < accounts.length; i += 100) {
+          batches.push(accounts.slice(i, i + 100).map(a => a.email));
+        }
+
+        for (const emailBatch of batches) {
+          const warmupRes = await this.getWarmupAnalytics(emailBatch);
+          
+          if (warmupRes.data?.aggregate_data) {
+            enrichedAccounts.forEach(account => {
+              const warmup = warmupRes.data?.aggregate_data[account.email];
+              if (warmup) {
+                account.health_score = warmup.health_score || account.warmup_score;
+                account.health_score_label = warmup.health_score_label || `${account.warmup_score}%`;
+                account.landed_inbox = warmup.landed_inbox || 0;
+                account.landed_spam = warmup.landed_spam || 0;
+              }
+            });
+          }
         }
       } catch (warmupError) {
         console.warn('[Instantly API v2] Warmup analytics failed, using defaults:', warmupError);
       }
     }
 
+    const errors = [
+      campaignsResult.error,
+      accountsResult.error,
+      tagsResult.error,
+      tagMappingsResult.error,
+      analyticsRes.error,
+    ].filter(Boolean).join('; ');
+
     return {
       campaigns: campaignsWithAnalytics,
+      activeCampaigns: activeCampaignsWithAnalytics,
       analytics,
       accounts: enrichedAccounts,
       tags,
       tagMappings,
-      error: campaignsRes.error || analyticsRes.error || accountsRes.error,
+      error: errors || undefined,
     };
-  }
-
-  /**
-   * Extract client name from campaign name
-   */
-  extractClientName(campaignName: string): string {
-    let name = campaignName;
-    
-    // Remove common prefixes
-    name = name.replace(/^\(barracuda\)\s*/i, '');
-    name = name.replace(/^\(baracuda\)\s*/i, '');
-    
-    // Remove common suffixes
-    name = name.replace(/\s*-\s*RR.*$/i, '');
-    name = name.replace(/\s*RR\s+.*$/i, '');
-    name = name.replace(/\s*V\d+.*$/i, '');
-    name = name.replace(/\s*Trial.*$/i, '');
-    name = name.replace(/\s*Rerun.*$/i, '');
-    name = name.replace(/\s*\(copy\).*$/i, '');
-    name = name.replace(/\s*Recycled.*$/i, '');
-    
-    // Try common patterns
-    const patterns = [
-      /^(.+?)\s*[-–—|]\s*/,
-      /^\[(.+?)\]\s*/,
-      /^(.+?):\s*/,
-    ];
-
-    for (const pattern of patterns) {
-      const match = name.match(pattern);
-      if (match) {
-        return match[1].trim();
-      }
-    }
-
-    // Use first two words as fallback
-    const words = name.trim().split(/\s+/);
-    return words.slice(0, 2).join(' ');
   }
 }
 
 export const instantlyService = new InstantlyService();
+export { CAMPAIGN_STATUS };

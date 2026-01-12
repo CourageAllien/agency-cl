@@ -31,10 +31,14 @@ interface TagMapping {
 
 interface DashboardResponse {
   clients: TransformedClient[];
+  activeClients: TransformedClient[];
   accounts: TransformedAccount[];
   portfolioMetrics: {
     totalClients: number;
     activeClients: number;
+    totalActiveCampaigns: number;
+    totalCampaigns: number;
+    activeCampaigns: number;
     totalSent: number;
     totalReplied: number;
     totalOpportunities: number;
@@ -62,6 +66,7 @@ interface DashboardResponse {
     warmup: number;
     avgHealth: number;
     lowHealth: number;
+    withErrors: number;
   };
   tags: CustomTag[];
   tagMappings: TagMapping[];
@@ -75,9 +80,11 @@ interface DashboardResponse {
     avgReplyRate: number;
   };
   meta: {
-    campaignCount: number;
+    totalCampaignCount: number;
+    activeCampaignCount: number;
     accountCount: number;
     clientCount: number;
+    activeClientCount: number;
     analyticsCount: number;
     tagCount: number;
     lastUpdated: string;

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { claudeService, type TerminalQueryContext } from '@/lib/services/claude';
 import { BENCHMARKS } from '@/lib/engine/benchmarks';
-import { BUCKET_CONFIGS } from '@/types/analysis';
 
 // Fetch dashboard data internally
 async function getDashboardData() {
@@ -10,19 +9,17 @@ async function getDashboardData() {
     const { instantlyService } = await import('@/lib/services/instantly');
     const { transformCampaignsToClients, transformAccounts, generateTasksFromClassifications } = await import('@/lib/services/dataTransformer');
     
-    const [campaignsRes, accountsRes] = await Promise.all([
-      instantlyService.getCampaigns(),
-      instantlyService.getAccounts(),
-    ]);
+    // Get full analytics (includes active campaigns)
+    const fullData = await instantlyService.getFullAnalytics();
     
-    const rawCampaigns = campaignsRes.data || [];
-    const rawAccounts = accountsRes.data || [];
+    const { campaigns, activeCampaigns, accounts } = fullData;
     
-    const clients = transformCampaignsToClients(rawCampaigns);
-    const accounts = transformAccounts(rawAccounts, clients);
+    // Transform using active campaigns for classification
+    const clients = transformCampaignsToClients(campaigns, activeCampaigns);
+    const transformedAccounts = transformAccounts(accounts);
     const tasks = generateTasksFromClassifications(clients);
     
-    return { clients, accounts, tasks, success: true };
+    return { clients, accounts: transformedAccounts, tasks, success: true };
   } catch (error) {
     console.error('Failed to fetch dashboard data for terminal:', error);
     return { clients: [], accounts: [], tasks: { daily: [], weekly: [] }, success: false };
@@ -54,10 +51,11 @@ export async function POST(request: Request) {
         opportunities: c.metrics.opportunities,
         totalSent: c.metrics.totalSent,
         positiveReplies: c.metrics.positiveReplies,
+        activeCampaigns: c.metrics.activeCampaignCount,
+        posReplyToMeeting: c.metrics.posReplyToMeeting,
       })),
       inboxes: accounts.map((a) => ({
         email: a.email,
-        clientName: a.clientName,
         status: a.status,
         healthScore: a.healthScore,
         tags: a.tags || [],

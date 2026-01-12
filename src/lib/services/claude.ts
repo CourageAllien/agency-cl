@@ -16,10 +16,12 @@ interface TerminalQueryContext {
     opportunities: number;
     totalSent: number;
     positiveReplies: number;
+    activeCampaigns?: number;
+    posReplyToMeeting?: number;
   }>;
+  // Note: Inboxes are shared across clients, not specific to one
   inboxes: Array<{
     email: string;
-    clientName: string;
     status: string;
     healthScore: number;
     tags: string[];
@@ -94,7 +96,7 @@ Clients (${context.clients.length}):
 ${context.clients.map(c => `- ${c.name}: ${c.bucket}, Reply Rate: ${c.replyRate.toFixed(2)}%, Conv: ${c.conversionRate.toFixed(2)}%, Opps: ${c.opportunities}`).join('\n')}
 
 Inboxes (${context.inboxes.length}):
-${context.inboxes.map(i => `- ${i.email} (${i.clientName}): ${i.status}, Health: ${i.healthScore}%${i.sendingError ? ` ERROR: ${i.errorMessage}` : ''}`).join('\n')}
+${context.inboxes.map(i => `- ${i.email}: ${i.status}, Health: ${i.healthScore}%${i.tags.length > 0 ? `, Tags: ${i.tags.join(', ')}` : ''}${i.sendingError ? ` ERROR: ${i.errorMessage}` : ''}`).join('\n')}
 
 Tasks (${context.tasks.length}):
 ${context.tasks.map(t => `- [${t.status}] ${t.clientName}: ${t.title}`).join('\n')}`;

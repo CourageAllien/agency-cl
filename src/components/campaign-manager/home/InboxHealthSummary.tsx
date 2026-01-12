@@ -25,9 +25,13 @@ export function InboxHealthSummary({
   accounts = [],
   inboxHealth,
 }: InboxHealthSummaryProps) {
+  // Filter by tag (since inboxes are shared, not client-specific)
   const filteredAccounts = useMemo(() => {
     if (filterClient === "all") return accounts;
-    return accounts.filter((a) => a.clientName === filterClient);
+    // Filter by tag that matches the client name
+    return accounts.filter((a) => 
+      a.tags.some(tag => tag.toLowerCase().includes(filterClient.toLowerCase()))
+    );
   }, [accounts, filterClient]);
 
   const stats = useMemo(() => {

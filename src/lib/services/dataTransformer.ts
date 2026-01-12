@@ -1,6 +1,12 @@
 /**
  * Data Transformer
  * Transforms Instantly API data into the app's internal format
+ * 
+ * KEY RULES:
+ * - Use ACTIVE campaigns only for classification and priority
+ * - Inboxes are NOT clients - shared across campaigns
+ * - "Interd" = "Interdependence" 
+ * - Lifetime data only for TAM exhaustion check
  */
 
 import { BENCHMARKS } from "@/lib/engine/benchmarks";
@@ -22,12 +28,25 @@ export type {
   InstantlyTagMapping,
 };
 
+// ============ CLIENT NAME MAPPINGS ============
+// Map campaign name patterns to actual client names
+const CLIENT_NAME_MAPPINGS: Record<string, string> = {
+  'interd': 'Interdependence',
+  'interdr': 'Interdependence',
+  'interdependence': 'Interdependence',
+  'wisdom ai': 'Wisdom AI',
+  'wisdomai': 'Wisdom AI',
+  // Add more mappings as discovered
+};
+
 // Transformed types for the app
 export interface TransformedClient {
   id: string;
   name: string;
   campaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>;
+  activeCampaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>;
   metrics: {
+    // Active campaign metrics (used for classification)
     totalSent: number;
     totalOpened: number;
     totalReplied: number;
@@ -43,13 +62,21 @@ export interface TransformedClient {
     leadsCount: number;
     contactedCount: number;
     completedCount: number;
-    // New fields from overview
     totalInterested: number;
     totalMeetingBooked: number;
     totalMeetingCompleted: number;
     totalClosed: number;
     positiveReplyRate: number;
     posReplyToMeeting: number;
+    // Campaign counts
+    activeCampaignCount: number;
+    totalCampaignCount: number;
+  };
+  // Lifetime metrics (for TAM exhaustion check)
+  lifetimeMetrics: {
+    totalSent: number;
+    totalLeads: number;
+    uncontactedLeads: number;
   };
   classification: ClientClassification;
   healthScore: number;
@@ -58,7 +85,7 @@ export interface TransformedClient {
 export interface TransformedAccount {
   id: string;
   email: string;
-  clientName: string;
+  // Note: Inboxes are shared, not specific to a client
   status: "connected" | "disconnected" | "warmup" | "error";
   healthScore: number;
   healthScoreLabel: string;
@@ -77,8 +104,18 @@ export interface TransformedAccount {
 
 /**
  * Extract client name from campaign name
+ * NEVER use inbox email as client name
  */
 export function extractClientName(campaignName: string): string {
+  const nameLower = campaignName.toLowerCase().trim();
+  
+  // Check for known client name mappings FIRST
+  for (const [pattern, clientName] of Object.entries(CLIENT_NAME_MAPPINGS)) {
+    if (nameLower.includes(pattern)) {
+      return clientName;
+    }
+  }
+
   let name = campaignName;
   
   // Remove common prefixes
@@ -93,7 +130,14 @@ export function extractClientName(campaignName: string): string {
   name = name.replace(/\s*Rerun.*$/i, '');
   name = name.replace(/\s*\(copy\).*$/i, '');
   name = name.replace(/\s*Recycled.*$/i, '');
+  name = name.replace(/\s*Final\s+Consumer.*$/i, '');
+  name = name.replace(/\s+Run$/i, '');
+  name = name.replace(/\s+rewarm$/i, '');
+  name = name.replace(/\s+Outlook.*$/i, '');
+  name = name.replace(/\s+hypertide.*$/i, '');
+  name = name.replace(/\s+generic\d*$/i, '');
   
+  // Try to extract from patterns
   const patterns = [
     /^(.+?)\s*[-–—|]\s*/,
     /^\[(.+?)\]\s*/,
@@ -103,15 +147,25 @@ export function extractClientName(campaignName: string): string {
   for (const pattern of patterns) {
     const match = name.match(pattern);
     if (match) {
-      return match[1].trim();
+      name = match[1].trim();
+      break;
     }
   }
 
-  const words = name.trim().split(/\s+/);
-  if (words.length >= 2) {
-    return words.slice(0, 2).join(" ");
+  // NEVER use email as client name
+  if (name.includes('@')) {
+    // Extract from campaign name before the email part
+    const words = campaignName.split(/\s+/).filter(w => !w.includes('@'));
+    name = words.slice(0, 2).join(' ') || 'Unknown';
   }
-  return campaignName;
+
+  // Use first 2-3 meaningful words as the client name
+  const words = name.trim().split(/\s+/).filter(w => w.length > 1);
+  if (words.length >= 2) {
+    return words.slice(0, 2).join(' ');
+  }
+  
+  return name.trim() || 'Unknown';
 }
 
 /**
@@ -135,10 +189,14 @@ export function groupCampaignsByClient(
 
 /**
  * Calculate metrics for a client's campaigns
+ * Uses ONLY ACTIVE campaigns for primary metrics
  */
 export function calculateClientMetrics(
-  campaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>
-): TransformedClient["metrics"] {
+  activeCampaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>,
+  allCampaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>
+): { metrics: TransformedClient["metrics"]; lifetimeMetrics: TransformedClient["lifetimeMetrics"] } {
+  
+  // Calculate metrics from ACTIVE campaigns only
   let totalSent = 0;
   let totalOpened = 0;
   let totalReplied = 0;
@@ -151,7 +209,7 @@ export function calculateClientMetrics(
   let totalMeetingCompleted = 0;
   let totalClosed = 0;
 
-  campaigns.forEach((campaign) => {
+  activeCampaigns.forEach((campaign) => {
     if (campaign.analytics) {
       totalSent += campaign.analytics.sent || campaign.analytics.total_sent || 0;
       totalOpened += campaign.analytics.unique_opened || campaign.analytics.total_opened || 0;
@@ -167,11 +225,23 @@ export function calculateClientMetrics(
     }
   });
 
+  // Calculate lifetime metrics from ALL campaigns (for TAM check)
+  let lifetimeSent = 0;
+  let lifetimeLeads = 0;
+  let lifetimeContacted = 0;
+
+  allCampaigns.forEach((campaign) => {
+    if (campaign.analytics) {
+      lifetimeSent += campaign.analytics.sent || campaign.analytics.total_sent || 0;
+      lifetimeLeads += campaign.analytics.total_leads || campaign.analytics.leads_count || 0;
+      lifetimeContacted += campaign.analytics.contacted || campaign.analytics.contacted_count || 0;
+    }
+  });
+
   const replyRate = totalSent > 0 ? (totalReplied / totalSent) * 100 : 0;
   const openRate = totalSent > 0 ? (totalOpened / totalSent) * 100 : 0;
   const bounceRate = totalSent > 0 ? (totalBounced / totalSent) * 100 : 0;
   
-  // Positive replies = interested responses
   const positiveReplies = totalInterested > 0 ? totalInterested : Math.floor(totalReplied * 0.5);
   const conversionRate = positiveReplies > 0 ? (opportunities / positiveReplies) * 100 : 0;
   const positiveReplyRate = totalReplied > 0 ? (totalInterested / totalReplied) * 100 : 0;
@@ -180,45 +250,64 @@ export function calculateClientMetrics(
   const uncontactedLeads = Math.max(0, leadsCount - contactedCount);
 
   return {
-    totalSent,
-    totalOpened,
-    totalReplied,
-    totalBounced,
-    replyRate: Number(replyRate.toFixed(2)),
-    openRate: Number(openRate.toFixed(2)),
-    bounceRate: Number(bounceRate.toFixed(2)),
-    positiveReplies,
-    opportunities,
-    conversionRate: Number(conversionRate.toFixed(2)),
-    uncontactedLeads,
-    avgInboxHealth: 85,
-    leadsCount,
-    contactedCount,
-    completedCount: 0,
-    totalInterested,
-    totalMeetingBooked,
-    totalMeetingCompleted,
-    totalClosed,
-    positiveReplyRate: Number(positiveReplyRate.toFixed(2)),
-    posReplyToMeeting: Number(posReplyToMeeting.toFixed(2)),
+    metrics: {
+      totalSent,
+      totalOpened,
+      totalReplied,
+      totalBounced,
+      replyRate: Number(replyRate.toFixed(2)),
+      openRate: Number(openRate.toFixed(2)),
+      bounceRate: Number(bounceRate.toFixed(2)),
+      positiveReplies,
+      opportunities,
+      conversionRate: Number(conversionRate.toFixed(2)),
+      uncontactedLeads,
+      avgInboxHealth: 85,
+      leadsCount,
+      contactedCount,
+      completedCount: 0,
+      totalInterested,
+      totalMeetingBooked,
+      totalMeetingCompleted,
+      totalClosed,
+      positiveReplyRate: Number(positiveReplyRate.toFixed(2)),
+      posReplyToMeeting: Number(posReplyToMeeting.toFixed(2)),
+      activeCampaignCount: activeCampaigns.length,
+      totalCampaignCount: allCampaigns.length,
+    },
+    lifetimeMetrics: {
+      totalSent: lifetimeSent,
+      totalLeads: lifetimeLeads,
+      uncontactedLeads: Math.max(0, lifetimeLeads - lifetimeContacted),
+    },
   };
 }
 
 /**
- * Classify a client into an issue bucket based on their metrics
+ * Classify a client into an issue bucket based on their ACTIVE campaign metrics
  */
-export function classifyClient(clientName: string, metrics: TransformedClient["metrics"]): ClientClassification {
-  const { replyRate, conversionRate, totalSent, uncontactedLeads, avgInboxHealth, bounceRate, posReplyToMeeting } = metrics;
+export function classifyClient(
+  clientName: string, 
+  metrics: TransformedClient["metrics"],
+  lifetimeMetrics: TransformedClient["lifetimeMetrics"]
+): ClientClassification {
+  const { replyRate, conversionRate, totalSent, uncontactedLeads, avgInboxHealth, bounceRate, posReplyToMeeting, activeCampaignCount } = metrics;
 
   let bucket: IssueBucket = "PERFORMING_WELL";
   let severity: "low" | "medium" | "high" | "critical" = "low";
   let reasoning: string[] = [];
 
-  // Too Early - not enough data
-  if (totalSent < 1000) {
+  // No active campaigns
+  if (activeCampaignCount === 0) {
     bucket = "TOO_EARLY";
     severity = "low";
-    reasoning = [`Only ${totalSent} emails sent, need more data for analysis`];
+    reasoning = ["No active campaigns running"];
+  }
+  // Too Early - not enough data from ACTIVE campaigns
+  else if (totalSent < 1000) {
+    bucket = "TOO_EARLY";
+    severity = "low";
+    reasoning = [`Only ${totalSent} emails sent from active campaigns, need more data`];
   }
   // Deliverability Issues
   else if (bounceRate > 5 || avgInboxHealth < BENCHMARKS.HEALTHY_INBOX) {
@@ -249,11 +338,11 @@ export function classifyClient(clientName: string, metrics: TransformedClient["m
     severity = "medium";
     reasoning = ["Good performance but low volume", "Consider scaling up sending"];
   }
-  // TAM Exhausted
-  else if (uncontactedLeads < BENCHMARKS.WARNING_UNCONTACTED) {
+  // TAM Exhausted - check LIFETIME uncontacted leads
+  else if (lifetimeMetrics.uncontactedLeads < BENCHMARKS.WARNING_UNCONTACTED) {
     bucket = "TAM_EXHAUSTED";
-    severity = uncontactedLeads < BENCHMARKS.CRITICAL_UNCONTACTED ? "critical" : "high";
-    reasoning = [`Only ${uncontactedLeads} uncontacted leads remaining`];
+    severity = lifetimeMetrics.uncontactedLeads < BENCHMARKS.CRITICAL_UNCONTACTED ? "critical" : "high";
+    reasoning = [`Only ${lifetimeMetrics.uncontactedLeads} uncontacted leads remaining (lifetime)`];
   }
   // Performing Well
   else if (replyRate >= BENCHMARKS.GOOD_REPLY_RATE && conversionRate >= BENCHMARKS.TARGET_CONVERSION) {
@@ -275,8 +364,8 @@ export function classifyClient(clientName: string, metrics: TransformedClient["m
     ...metrics,
     totalReplies: metrics.totalReplied,
     totalLeads: metrics.leadsCount,
-    activeCampaigns: 1,
-    activeInboxes: 2,
+    activeCampaigns: metrics.activeCampaignCount,
+    activeInboxes: 0,
     disconnectedInboxes: 0,
     lowHealthInboxes: 0,
   };
@@ -303,8 +392,13 @@ export function classifyClient(clientName: string, metrics: TransformedClient["m
  * Calculate overall health score for a client
  */
 export function calculateHealthScore(metrics: TransformedClient["metrics"]): number {
-  const { replyRate, conversionRate, bounceRate, avgInboxHealth, posReplyToMeeting } = metrics;
+  const { replyRate, conversionRate, bounceRate, avgInboxHealth, posReplyToMeeting, activeCampaignCount } = metrics;
   
+  // No active campaigns = low health
+  if (activeCampaignCount === 0) {
+    return 30;
+  }
+
   const replyWeight = 0.30;
   const conversionWeight = 0.20;
   const bounceWeight = 0.15;
@@ -329,83 +423,67 @@ export function calculateHealthScore(metrics: TransformedClient["metrics"]): num
 
 /**
  * Transform Instantly campaigns into app's client format
+ * Uses ACTIVE campaigns for classification
  */
 export function transformCampaignsToClients(
-  campaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>
+  allCampaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>,
+  activeCampaigns: Array<InstantlyCampaign & { analytics?: InstantlyCampaignAnalytics }>
 ): TransformedClient[] {
-  const clientMap = groupCampaignsByClient(campaigns);
+  // Group ALL campaigns by client
+  const allClientMap = groupCampaignsByClient(allCampaigns);
+  
+  // Group ACTIVE campaigns by client
+  const activeClientMap = groupCampaignsByClient(activeCampaigns);
+  
   const clients: TransformedClient[] = [];
 
-  clientMap.forEach((clientCampaigns, clientName) => {
-    const metrics = calculateClientMetrics(clientCampaigns);
-    const classification = classifyClient(clientName, metrics);
+  // Process all clients (even those without active campaigns)
+  allClientMap.forEach((clientCampaigns, clientName) => {
+    const activeClientCampaigns = activeClientMap.get(clientName) || [];
+    
+    const { metrics, lifetimeMetrics } = calculateClientMetrics(activeClientCampaigns, clientCampaigns);
+    const classification = classifyClient(clientName, metrics, lifetimeMetrics);
     const healthScore = calculateHealthScore(metrics);
 
     clients.push({
       id: clientName.toLowerCase().replace(/\s+/g, "-"),
       name: clientName,
       campaigns: clientCampaigns,
+      activeCampaigns: activeClientCampaigns,
       metrics,
+      lifetimeMetrics,
       classification,
       healthScore,
     });
   });
 
+  // Sort by health score (worst first for priority)
   return clients.sort((a, b) => a.healthScore - b.healthScore);
 }
 
 /**
  * Transform Instantly accounts into app's account format
+ * Note: Inboxes are shared, not specific to clients
  */
-export function transformAccounts(accounts: InstantlyAccount[], clients: TransformedClient[]): TransformedAccount[] {
-  return accounts.map((account) => {
-    const emailDomain = account.email.split("@")[1]?.split(".")[0] || "";
-    let clientName = "Unknown";
-    
-    // Try to find matching client by email domain or tags
-    for (const client of clients) {
-      if (
-        client.name.toLowerCase().includes(emailDomain.toLowerCase()) ||
-        emailDomain.toLowerCase().includes(client.name.toLowerCase().split(" ")[0])
-      ) {
-        clientName = client.name;
-        break;
-      }
-    }
-
-    // If account has tags, try matching by tag name
-    if (clientName === "Unknown" && account.tags.length > 0) {
-      for (const client of clients) {
-        if (account.tags.some(tag => 
-          tag.toLowerCase().includes(client.name.toLowerCase()) ||
-          client.name.toLowerCase().includes(tag.toLowerCase())
-        )) {
-          clientName = client.name;
-          break;
-        }
-      }
-    }
-
-    return {
-      id: account.id || account.email,
-      email: account.email,
-      clientName,
-      status: account.statusLabel,
-      healthScore: account.health_score,
-      healthScoreLabel: account.health_score_label,
-      dailySendLimit: account.daily_limit || 50,
-      sentToday: 0,
-      provider: account.providerLabel || "Unknown",
-      tags: account.tags || [],
-      warmupStatus: account.warmup_enabled ? "active" : "inactive",
-      warmupScore: account.warmup_score || 0,
-      landedInbox: account.landed_inbox || 0,
-      landedSpam: account.landed_spam || 0,
-      sendingError: account.has_error,
-      errorMessage: account.error_message,
-      lastUsed: account.last_used,
-    };
-  });
+export function transformAccounts(accounts: InstantlyAccount[]): TransformedAccount[] {
+  return accounts.map((account) => ({
+    id: account.id || account.email,
+    email: account.email,
+    status: account.statusLabel,
+    healthScore: account.health_score,
+    healthScoreLabel: account.health_score_label,
+    dailySendLimit: account.daily_limit || 50,
+    sentToday: 0,
+    provider: account.providerLabel || "Unknown",
+    tags: account.tags || [],
+    warmupStatus: account.warmup_enabled ? "active" : "inactive",
+    warmupScore: account.warmup_score || 0,
+    landedInbox: account.landed_inbox || 0,
+    landedSpam: account.landed_spam || 0,
+    sendingError: account.has_error,
+    errorMessage: account.error_message,
+    lastUsed: account.last_used,
+  }));
 }
 
 /**
@@ -413,7 +491,7 @@ export function transformAccounts(accounts: InstantlyAccount[], clients: Transfo
  */
 export function calculatePortfolioMetrics(clients: TransformedClient[], accounts: TransformedAccount[]) {
   const totalClients = clients.length;
-  const activeClients = clients.filter(c => c.metrics.totalSent > 0).length;
+  const activeClients = clients.filter(c => c.metrics.activeCampaignCount > 0).length;
   
   let totalSent = 0;
   let totalReplied = 0;
@@ -421,6 +499,7 @@ export function calculatePortfolioMetrics(clients: TransformedClient[], accounts
   let totalInterested = 0;
   let totalMeetingBooked = 0;
   let healthSum = 0;
+  let totalActiveCampaigns = 0;
 
   clients.forEach(client => {
     totalSent += client.metrics.totalSent;
@@ -429,6 +508,7 @@ export function calculatePortfolioMetrics(clients: TransformedClient[], accounts
     totalInterested += client.metrics.totalInterested;
     totalMeetingBooked += client.metrics.totalMeetingBooked;
     healthSum += client.healthScore;
+    totalActiveCampaigns += client.metrics.activeCampaignCount;
   });
 
   const avgReplyRate = totalSent > 0 ? (totalReplied / totalSent) * 100 : 0;
@@ -445,6 +525,7 @@ export function calculatePortfolioMetrics(clients: TransformedClient[], accounts
   return {
     totalClients,
     activeClients,
+    totalActiveCampaigns,
     totalSent,
     totalReplied,
     totalOpportunities,
@@ -502,6 +583,7 @@ const BUCKET_TASKS: Record<IssueBucket, { daily: string[]; weekly: string[] }> =
 
 /**
  * Generate tasks based on client classifications
+ * Prioritizes clients with ACTIVE campaigns and issues
  */
 export function generateTasksFromClassifications(clients: TransformedClient[]) {
   const daily: Array<{
@@ -521,18 +603,22 @@ export function generateTasksFromClassifications(clients: TransformedClient[]) {
   const today = new Date().toISOString().split("T")[0];
   const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-  clients.forEach((client) => {
+  // Only generate tasks for clients with active campaigns
+  const activeClients = clients.filter(c => c.metrics.activeCampaignCount > 0);
+
+  activeClients.forEach((client) => {
     const { bucket, severity } = client.classification;
     const tasks = BUCKET_TASKS[bucket];
 
     if (!tasks) return;
 
+    // Generate daily tasks for critical/high severity issues
     if (severity === "critical" || severity === "high") {
       tasks.daily.forEach((taskTitle, index) => {
         daily.push({
           id: `${client.id}-daily-${index}`,
           title: taskTitle,
-          description: `Action required for ${client.name}`,
+          description: `Action required for ${client.name} (${client.metrics.activeCampaignCount} active campaigns)`,
           clientId: client.id,
           clientName: client.name,
           bucket,
@@ -543,6 +629,7 @@ export function generateTasksFromClassifications(clients: TransformedClient[]) {
       });
     }
 
+    // Generate weekly tasks
     tasks.weekly.forEach((taskTitle, index) => {
       weekly.push({
         id: `${client.id}-weekly-${index}`,

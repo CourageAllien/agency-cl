@@ -342,11 +342,13 @@ export const BLOCKED_DOMAINS = [
 
 // Benchmarks
 export const BENCHMARKS = {
-  MIN_REPLY_RATE: 0.45,        // 0.45% minimum
+  MIN_REPLY_RATE: 0.45,        // 0.45% minimum reply rate
   TARGET_CONVERSION: 40,        // 40% positive reply to meeting
   MIN_HEALTH_SCORE: 93,         // Inbox health threshold
-  LOW_LEADS_WARNING: 3000,      // Warning threshold (absolute number)
-  LOW_LEADS_CRITICAL: 1000,     // Critical threshold
+  // LEADS: uncontacted = total_leads - contacted
+  // CRITICAL = uncontacted < 3,000
+  LOW_LEADS_CRITICAL: 3000,     // CRITICAL threshold - need new list urgently
+  LOW_LEADS_WARNING: 5000,      // Warning threshold - plan for new list soon
   SEND_VOLUME_THRESHOLD: -20,   // % below average = abnormally low
   TREND_SIGNIFICANT: 5,         // % change to be significant
   MIN_DATA_THRESHOLD: 10000,    // Minimum sends for classification

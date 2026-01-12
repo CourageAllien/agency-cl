@@ -1066,32 +1066,23 @@ class InstantlyService {
       const uniqueReplies = (raw.reply_count_unique || raw.unique_replies || raw.replies || 0) as number;
       const uniqueOpened = (raw.open_count_unique || raw.unique_opened || raw.opened || 0) as number;
       const bounced = (raw.bounced_count || raw.bounced || 0) as number;
-      const totalLeads = (raw.leads_count || raw.total_leads || raw.lead_count || 0) as number;
-      const contacted = (raw.contacted_count || raw.contacted || 0) as number;
-      const completed = (raw.completed_count || raw.completed || raw.sequence_completed_count || 0) as number;
-      const inProgress = (raw.in_progress_count || raw.in_progress || 0) as number;
       const unsubscribed = (raw.unsubscribed_count || raw.unsubscribed || 0) as number;
       const totalInterested = (overview?.total_interested || 0) as number;
       const totalMeetingBooked = (overview?.total_meeting_booked || 0) as number;
       const totalOpportunities = (raw.total_opportunities || overview?.total_opportunities || 0) as number;
       
-      // "Not yet contacted" - leads that haven't received any email yet
-      // This is a SEPARATE field from the API, not calculated!
-      // If API provides it directly, use it. Otherwise calculate from total - contacted
-      const notYetContacted = (raw.not_yet_contacted || raw.not_contacted || raw.pending || 0) as number;
+      // IMPORTANT: Get total_leads and contacted correctly
+      // total_leads = total number of leads in campaign
+      // contacted = leads that have received at least one email
+      const totalLeads = (raw.total_leads || raw.leads_count || 0) as number;
+      const contacted = (raw.contacted || raw.contacted_count || 0) as number;
       
-      // Final uncontacted: prefer API field, fallback to calculation
-      const uncontacted = notYetContacted > 0 
-        ? notYetContacted 
-        : Math.max(0, totalLeads - contacted);
+      // SIMPLE FORMULA: uncontacted = total_leads - contacted
+      // CRITICAL threshold: < 3,000 uncontacted
+      const uncontacted = Math.max(0, totalLeads - contacted);
       
-      // Debug log for first few campaigns
-      if (rawAnalytics.indexOf(raw) < 3) {
-        console.log(`[DEBUG] Campaign "${raw.campaign_name}":`, {
-          totalLeads, contacted, completed, inProgress, notYetContacted, uncontacted,
-          rawFields: Object.keys(raw).filter(k => k.includes('contact') || k.includes('lead') || k.includes('progress'))
-        });
-      }
+      // Debug log for ALL campaigns to verify data
+      console.log(`[ANALYTICS] "${raw.campaign_name}": total_leads=${totalLeads}, contacted=${contacted}, uncontacted=${uncontacted}, sent=${sent}`);
 
       const replyRate = sent > 0 ? (uniqueReplies / sent) * 100 : 0;
       const conversionRate = uniqueReplies > 0 ? (totalOpportunities / uniqueReplies) * 100 : 0;

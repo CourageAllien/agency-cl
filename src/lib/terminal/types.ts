@@ -1,18 +1,19 @@
 // Terminal Command Types
 
 export type CommandType = 
-  // Daily commands
-  | 'daily'
+  // Time-period analysis
+  | 'daily'      // Today's campaign analysis
+  | 'weekly'     // 7-day campaign analysis
+  // Task commands
   | 'send_volume'
   | 'low_leads'
   | 'blocked_domains'
-  // Weekly commands
   | 'benchmarks'
   | 'conversion'
   | 'inbox_health'
   | 'removed_inboxes'
   | 'reply_trends'
-  | 'weekly_summary'
+  | 'weekly_summary'  // Full weekly checklist
   // Utility
   | 'refresh'
   | 'help'
@@ -155,12 +156,19 @@ export const COMMAND_ALIASES: Record<string, CommandType> = {
   'blocked email providers': 'blocked_domains',
   'blocked': 'blocked_domains',
   
-  // Weekly
-  'w': 'weekly_summary',
-  'weekly': 'weekly_summary',
+  // Weekly analysis (7-day period)
+  'w': 'weekly',
+  'weekly': 'weekly',
+  'this week': 'weekly',
+  'last 7 days': 'weekly',
+  '7 day': 'weekly',
+  'week report': 'weekly',
+  
+  // Weekly summary (full checklist)
   'weekly summary': 'weekly_summary',
   'wednesday tasks': 'weekly_summary',
   'show wednesday checklist': 'weekly_summary',
+  'full weekly': 'weekly_summary',
   
   'benchmarks': 'benchmarks',
   'campaigns below benchmarks': 'benchmarks',

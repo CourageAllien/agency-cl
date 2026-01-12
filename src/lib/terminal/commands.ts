@@ -34,7 +34,8 @@ export function parseCommand(input: string): CommandType {
   
   // Fuzzy matching for natural language
   const patterns: [RegExp, CommandType][] = [
-    [/\b(daily|today|need.*(to do|attention))\b/i, 'daily'],
+    [/\b(today|today's)\b/i, 'daily'],
+    [/\b(this week|7.?day|weekly report|week analysis)\b/i, 'weekly'],
     [/\b(send|volume|sending)\b/i, 'send_volume'],
     [/\b(low|leads|3000|need leads)\b/i, 'low_leads'],
     [/\b(block|microsoft|proofpoint|mimecast|cisco)\b/i, 'blocked_domains'],
@@ -43,7 +44,7 @@ export function parseCommand(input: string): CommandType {
     [/\b(inbox|disconnect|error)\b/i, 'inbox_health'],
     [/\b(removed|removal|tag report)\b/i, 'removed_inboxes'],
     [/\b(trend|declining|downward)\b/i, 'reply_trends'],
-    [/\b(weekly|wednesday|w)\b/i, 'weekly_summary'],
+    [/\b(wednesday|weekly summary|full weekly)\b/i, 'weekly_summary'],
     [/\b(help|\?|command)\b/i, 'help'],
   ];
   
@@ -84,6 +85,8 @@ export async function executeCommand(
     switch (commandType) {
       case 'daily':
         return await handleDailyCommand(forceRefresh);
+      case 'weekly':
+        return await handleWeeklyCommand(forceRefresh);
       case 'send_volume':
         return await handleSendVolumeCommand(forceRefresh);
       case 'low_leads':
@@ -216,6 +219,166 @@ async function handleDailyCommand(forceRefresh: boolean): Promise<TerminalRespon
   };
   
   terminalCache.set(cacheKey, response, 'daily');
+  return response;
+}
+
+// Weekly Analysis - 7-day campaign performance
+async function handleWeeklyCommand(forceRefresh: boolean): Promise<TerminalResponse> {
+  const cacheKey = terminalCache.getCacheKey('weekly', {});
+  
+  if (!forceRefresh) {
+    const cached = terminalCache.get<TerminalResponse>(cacheKey, 'analytics');
+    if (cached) {
+      cached.metadata.cached = true;
+      cached.metadata.timestamp = terminalCache.getAge(cacheKey);
+      return cached;
+    }
+  }
+  
+  const data = await instantlyService.getFullAnalytics();
+  const activeCampaigns = data.activeCampaigns || [];
+  
+  // Calculate 7-day metrics
+  const totalSent = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.sent || 0), 0);
+  const totalReplies = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.unique_replies || 0), 0);
+  const totalOpportunities = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.total_opportunities || 0), 0);
+  const totalBounced = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.bounced || 0), 0);
+  const totalMeetings = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.total_meeting_booked || 0), 0);
+  const totalInterested = activeCampaigns.reduce((sum, c) => sum + (c.analytics?.total_interested || 0), 0);
+  
+  const overallReplyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0;
+  const bounceRate = totalSent > 0 ? (totalBounced / totalSent) * 100 : 0;
+  const conversionRate = totalReplies > 0 ? (totalOpportunities / totalReplies) * 100 : 0;
+  const meetingRate = totalInterested > 0 ? (totalMeetings / totalInterested) * 100 : 0;
+  
+  // Top performing campaigns
+  const sortedCampaigns = [...activeCampaigns]
+    .filter(c => c.analytics && c.analytics.sent > 500)
+    .sort((a, b) => {
+      const aRate = a.analytics ? (a.analytics.unique_replies / a.analytics.sent) * 100 : 0;
+      const bRate = b.analytics ? (b.analytics.unique_replies / b.analytics.sent) * 100 : 0;
+      return bRate - aRate;
+    });
+  
+  const topCampaigns = sortedCampaigns.slice(0, 5);
+  const bottomCampaigns = sortedCampaigns.slice(-5).reverse();
+  
+  // Campaigns needing attention
+  const campaignsNeedingAttention = activeCampaigns.filter(c => {
+    if (!c.analytics) return false;
+    const replyRate = c.analytics.sent > 0 ? (c.analytics.unique_replies / c.analytics.sent) * 100 : 0;
+    return replyRate < BENCHMARKS.MIN_REPLY_RATE && c.analytics.sent > 1000;
+  });
+  
+  const sections: TerminalSection[] = [
+    {
+      title: 'WEEKLY OVERVIEW',
+      type: 'summary',
+      status: {
+        label: '7-Day Performance',
+        value: `${overallReplyRate.toFixed(2)}% reply rate`,
+        icon: overallReplyRate >= BENCHMARKS.MIN_REPLY_RATE ? '✅' : '⚠️'
+      }
+    },
+    {
+      title: 'KEY METRICS',
+      type: 'list',
+      items: [
+        {
+          name: 'Emails Sent',
+          details: [totalSent.toLocaleString(), 'Total emails sent this week'],
+          priority: 'LOW'
+        },
+        {
+          name: 'Replies',
+          details: [`${totalReplies.toLocaleString()} (${overallReplyRate.toFixed(2)}% rate)`],
+          priority: overallReplyRate >= BENCHMARKS.MIN_REPLY_RATE ? 'LOW' : 'MEDIUM'
+        },
+        {
+          name: 'Opportunities',
+          details: [`${totalOpportunities.toLocaleString()} (${conversionRate.toFixed(1)}% conversion)`],
+          priority: conversionRate >= BENCHMARKS.TARGET_CONVERSION ? 'LOW' : 'MEDIUM'
+        },
+        {
+          name: 'Meetings Booked',
+          details: [`${totalMeetings} (${meetingRate.toFixed(1)}% from positive replies)`],
+          priority: meetingRate >= BENCHMARKS.TARGET_CONVERSION ? 'LOW' : 'MEDIUM'
+        },
+        {
+          name: 'Bounce Rate',
+          details: [`${bounceRate.toFixed(2)}%`, bounceRate > 5 ? 'Higher than target' : 'Within healthy range'],
+          priority: bounceRate > 5 ? 'HIGH' : 'LOW'
+        }
+      ]
+    }
+  ];
+  
+  // Top performers
+  if (topCampaigns.length > 0) {
+    sections.push({
+      title: 'TOP PERFORMING CAMPAIGNS',
+      type: 'list',
+      count: topCampaigns.length,
+      items: topCampaigns.map(c => {
+        const rate = c.analytics ? (c.analytics.unique_replies / c.analytics.sent) * 100 : 0;
+        return {
+          name: c.name,
+          details: [
+            `Reply Rate: ${rate.toFixed(2)}%`,
+            `Sent: ${c.analytics?.sent.toLocaleString() || 0}`,
+            `Replies: ${c.analytics?.unique_replies || 0}`
+          ],
+          priority: 'LOW' as const
+        };
+      })
+    });
+  }
+  
+  // Needs attention
+  if (campaignsNeedingAttention.length > 0) {
+    sections.push({
+      title: 'CAMPAIGNS NEEDING ATTENTION',
+      type: 'list',
+      count: campaignsNeedingAttention.length,
+      items: campaignsNeedingAttention.slice(0, 5).map(c => {
+        const rate = c.analytics ? (c.analytics.unique_replies / c.analytics.sent) * 100 : 0;
+        return {
+          name: c.name,
+          details: [
+            `Reply Rate: ${rate.toFixed(2)}% (below ${BENCHMARKS.MIN_REPLY_RATE}% target)`,
+            `Sent: ${c.analytics?.sent.toLocaleString() || 0}`,
+            'Action: Review copy and targeting'
+          ],
+          priority: 'HIGH' as const
+        };
+      })
+    });
+  }
+  
+  const response: TerminalResponse = {
+    type: 'success',
+    command: 'weekly',
+    title: 'Weekly Campaign Report (7 Days)',
+    icon: '📊',
+    sections,
+    summary: [
+      `${activeCampaigns.length} active campaigns analyzed`,
+      `${totalSent.toLocaleString()} emails sent this week`,
+      `${totalReplies.toLocaleString()} replies (${overallReplyRate.toFixed(2)}%)`,
+      `${totalOpportunities} opportunities generated`,
+      campaignsNeedingAttention.length > 0 
+        ? `⚠️ ${campaignsNeedingAttention.length} campaigns below benchmarks`
+        : '✅ All campaigns performing within benchmarks'
+    ],
+    metadata: {
+      timestamp: 'just now',
+      cached: false,
+      campaignCount: activeCampaigns.length,
+      issueCount: campaignsNeedingAttention.length
+    }
+  };
+  
+  terminalCache.set(cacheKey, response, 'analytics');
   return response;
 }
 

@@ -1,5 +1,6 @@
-import { AppSidebar } from "@/components/layout/AppSidebar";
-import { Header } from "@/components/layout/Header";
+"use client";
+
+import { LayoutWrapper } from "@/components/layout/LayoutWrapper";
 
 export default function CampaignManagerLayout({
   children,
@@ -7,14 +8,8 @@ export default function CampaignManagerLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex h-screen overflow-hidden">
-      <AppSidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-y-auto bg-background gradient-mesh">
-          {children}
-        </main>
-      </div>
-    </div>
+    <LayoutWrapper showHeader={true} className="gradient-mesh">
+      {children}
+    </LayoutWrapper>
   );
 }

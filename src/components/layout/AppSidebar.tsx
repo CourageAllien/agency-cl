@@ -18,9 +18,13 @@ import {
   Shield,
   ExternalLink,
   Sparkles,
+  PanelLeftClose,
+  PanelLeft,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface NavItem {
   title: string;
@@ -36,11 +40,10 @@ interface NavSection {
   href: string;
   items: NavItem[];
   disabled?: boolean;
-  isTopLevel?: boolean; // For standalone pages like Terminal
+  isTopLevel?: boolean;
 }
 
 const navigation: NavSection[] = [
-  // Terminal is now a top-level standalone page
   {
     title: "Command Terminal",
     icon: Terminal,
@@ -48,7 +51,6 @@ const navigation: NavSection[] = [
     isTopLevel: true,
     items: [],
   },
-  // Campaign Manager section
   {
     title: "Campaign Manager",
     icon: Target,
@@ -100,25 +102,108 @@ const navigation: NavSection[] = [
   },
 ];
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  collapsed?: boolean;
+  onToggle?: () => void;
+}
+
+export function AppSidebar({ collapsed = false, onToggle }: AppSidebarProps) {
   const pathname = usePathname();
 
-  // Determine active section
   const activeSection = navigation.find((section) =>
     pathname.startsWith(section.href)
   );
 
+  if (collapsed) {
+    return (
+      <TooltipProvider delayDuration={0}>
+        <aside className="flex h-screen w-16 flex-col border-r border-border bg-card/50">
+          {/* Logo */}
+          <div className="flex h-16 items-center justify-center">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
+              <Target className="h-5 w-5 text-primary-foreground" />
+            </div>
+          </div>
+
+          <Separator />
+
+          <ScrollArea className="flex-1 py-4">
+            <nav className="flex flex-col items-center gap-2 px-2">
+              {navigation.map((section) => {
+                const isActive = pathname.startsWith(section.href);
+                const SectionIcon = section.icon;
+
+                return (
+                  <Tooltip key={section.href}>
+                    <TooltipTrigger asChild>
+                      <Link
+                        href={section.disabled ? "#" : section.href}
+                        className={cn(
+                          "flex h-10 w-10 items-center justify-center rounded-lg transition-colors",
+                          isActive
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                          section.disabled && "pointer-events-none opacity-50"
+                        )}
+                      >
+                        <SectionIcon className="h-5 w-5" />
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>{section.title}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </nav>
+          </ScrollArea>
+
+          <Separator />
+
+          {/* Expand Button */}
+          <div className="p-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onToggle}
+                  className="h-10 w-10"
+                >
+                  <PanelLeft className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>Expand sidebar</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </aside>
+      </TooltipProvider>
+    );
+  }
+
   return (
     <aside className="flex h-screen w-64 flex-col border-r border-border bg-card/50">
       {/* Logo */}
-      <div className="flex h-16 items-center gap-3 px-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-          <Target className="h-5 w-5 text-primary-foreground" />
+      <div className="flex h-16 items-center justify-between px-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
+            <Target className="h-5 w-5 text-primary-foreground" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-foreground">Agency</h1>
+            <p className="text-xs text-muted-foreground">Command Center</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-sm font-semibold text-foreground">Agency</h1>
-          <p className="text-xs text-muted-foreground">Command Center</p>
-        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggle}
+          className="h-8 w-8"
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </Button>
       </div>
 
       <Separator />
@@ -129,7 +214,6 @@ export function AppSidebar() {
             const isActive = pathname.startsWith(section.href);
             const SectionIcon = section.icon;
 
-            // Top-level standalone pages (like Terminal)
             if (section.isTopLevel) {
               return (
                 <div key={section.href}>
@@ -150,10 +234,8 @@ export function AppSidebar() {
               );
             }
 
-            // Regular sections with sub-items
             return (
               <div key={section.href} className="space-y-1">
-                {/* Section Header */}
                 <div
                   className={cn(
                     "flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider",
@@ -170,7 +252,6 @@ export function AppSidebar() {
                   )}
                 </div>
 
-                {/* Section Items */}
                 {isActive && !section.disabled && (
                   <div className="ml-4 space-y-1">
                     {section.items.map((item) => {
@@ -209,7 +290,6 @@ export function AppSidebar() {
 
       <Separator />
 
-      {/* Footer */}
       <div className="p-4">
         <Link
           href="https://instantly.ai"

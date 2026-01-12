@@ -1,11 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -16,124 +14,93 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
-  Terminal,
   Send,
   Sparkles,
   Loader2,
-  ChevronRight,
   HelpCircle,
-  CalendarDays,
-  CalendarClock,
   Zap,
   RefreshCw,
-  TrendingDown,
-  AlertTriangle,
-  Mail,
-  Target,
-  CheckSquare,
-  Ban,
+  ArrowUp,
+  User,
+  Bot,
+  Copy,
+  Check,
+  Calendar,
+  CalendarDays,
 } from "lucide-react";
 
 interface Message {
   id: string;
-  type: "user" | "assistant";
+  role: "user" | "assistant";
   content: string;
   timestamp: Date;
-  command?: string;
-  structured?: unknown;
+  isTyping?: boolean;
 }
 
-// Quick command buttons for each category
-const DAILY_COMMANDS = [
-  { command: "daily", label: "Daily Summary", icon: CalendarDays, shortcut: "d" },
-  { command: "send volume", label: "Send Volume", icon: TrendingDown },
-  { command: "low leads", label: "Low Leads", icon: AlertTriangle },
-  { command: "blocked domains", label: "Blocked Domains", icon: Ban },
+// Quick suggestion chips
+const QUICK_SUGGESTIONS = [
+  { label: "Daily report", query: "daily" },
+  { label: "Weekly analysis", query: "weekly" },
+  { label: "Low leads", query: "Which campaigns have low leads?" },
+  { label: "Inbox health", query: "How are my inboxes doing?" },
+  { label: "Reply rates", query: "Show me reply rate trends" },
+  { label: "Benchmarks", query: "Which campaigns aren't hitting benchmarks?" },
 ];
 
-const WEEKLY_COMMANDS = [
-  { command: "weekly summary", label: "Weekly Summary", icon: CalendarClock, shortcut: "w" },
-  { command: "benchmarks", label: "Benchmarks", icon: Target },
-  { command: "conversion", label: "Conversion", icon: CheckSquare },
-  { command: "inbox health", label: "Inbox Health", icon: Mail },
-  { command: "reply trends", label: "Reply Trends", icon: TrendingDown },
+const COMMAND_HELP = [
+  { category: "Time Analysis", commands: [
+    { cmd: "daily", desc: "Analyze today's campaign performance" },
+    { cmd: "weekly", desc: "Analyze this week's campaign data" },
+  ]},
+  { category: "Daily Tasks", commands: [
+    { cmd: "send volume", desc: "Check if send volume is normal" },
+    { cmd: "low leads", desc: "Find campaigns with <3000 leads" },
+    { cmd: "blocked domains", desc: "Check for MSFT/Proofpoint/Mimecast/Cisco leads" },
+  ]},
+  { category: "Weekly Tasks", commands: [
+    { cmd: "benchmarks", desc: "Campaigns not hitting targets" },
+    { cmd: "conversion", desc: "Check positive reply to meeting rate" },
+    { cmd: "inbox health", desc: "Find disconnected/error inboxes" },
+    { cmd: "reply trends", desc: "Analyze trending reply rates" },
+  ]},
+  { category: "Natural Language", commands: [
+    { cmd: "Ask anything", desc: "e.g., 'Which clients need attention?'" },
+    { cmd: "Follow-up", desc: "e.g., 'Tell me more about Privy'" },
+  ]},
 ];
-
-interface CommandHelpItem {
-  cmd: string;
-  alias?: string;
-  desc: string;
-}
-
-const COMMAND_HELP: Record<string, { commands: CommandHelpItem[] }> = {
-  "Daily Commands": {
-    commands: [
-      { cmd: "daily", alias: "d", desc: "Full daily summary" },
-      { cmd: "send volume", desc: "Check if send volume is low" },
-      { cmd: "low leads", desc: "Campaigns <3000 leads" },
-      { cmd: "blocked domains", desc: "Check MSFT/Proofpoint/Mimecast/Cisco" },
-    ]
-  },
-  "Weekly Commands": {
-    commands: [
-      { cmd: "weekly summary", alias: "w", desc: "Full Wednesday checklist" },
-      { cmd: "benchmarks", desc: "Campaigns not hitting targets" },
-      { cmd: "conversion", desc: "<40% positive reply to meeting" },
-      { cmd: "inbox health", desc: "Disconnected/error inboxes" },
-      { cmd: "reply trends", desc: "Trending downward analysis" },
-      { cmd: "removed inboxes", desc: "Tag removal report" },
-    ]
-  },
-  "Utility": {
-    commands: [
-      { cmd: "refresh [command]", desc: "Force fresh data" },
-      { cmd: "help", desc: "Show all commands" },
-    ]
-  }
-};
 
 export default function TerminalPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      type: "assistant",
-      content: `🚀 **Welcome to the Campaign Terminal!**
-
-I'm connected to your Instantly data and ready to help with your daily & weekly tasks.
-
-**Quick Start:**
-• Type **d** for daily tasks
-• Type **w** for weekly summary
-• Or click any button below
-
-**12 Commands Available:**
-• 4 daily commands (send volume, low leads, blocked domains)
-• 6 weekly commands (benchmarks, conversion, inbox health, trends)
-• Type **help** for the full list`,
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [activeTab, setActiveTab] = useState<"daily" | "weekly">("daily");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const scrollElement = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollElement) {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+      }
     }
   }, [messages]);
 
-  const handleSubmit = async (commandOverride?: string) => {
-    const commandToSend = commandOverride || input.trim();
-    if (!commandToSend || isLoading) return;
+  // Focus input on mount
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleSubmit = async (queryOverride?: string) => {
+    const query = queryOverride || input.trim();
+    if (!query || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      type: "user",
-      content: commandToSend,
+      role: "user",
+      content: query,
       timestamp: new Date(),
     };
 
@@ -141,45 +108,40 @@ I'm connected to your Instantly data and ready to help with your daily & weekly 
     setInput("");
     setIsLoading(true);
 
+    // Add typing indicator
+    const typingId = (Date.now() + 1).toString();
+    setMessages((prev) => [...prev, {
+      id: typingId,
+      role: "assistant",
+      content: "",
+      timestamp: new Date(),
+      isTyping: true,
+    }]);
+
     try {
       const response = await fetch('/api/terminal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: commandToSend }),
+        body: JSON.stringify({ query }),
       });
 
-      let assistantContent: string;
-      let command: string | undefined;
-      let structured: unknown;
+      const data = await response.json();
 
-      if (response.ok) {
-        const data = await response.json();
-        assistantContent = data.response || "I couldn't process that request. Please try again.";
-        command = data.command;
-        structured = data.structured;
-      } else {
-        assistantContent = "⚠️ Unable to connect to the terminal service. Please try again.";
-      }
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "assistant",
-        content: assistantContent,
+      // Replace typing indicator with actual response
+      setMessages((prev) => prev.filter(m => m.id !== typingId).concat({
+        id: typingId,
+        role: "assistant",
+        content: data.response || "I couldn't process that request. Please try again.",
         timestamp: new Date(),
-        command,
-        structured,
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
+      }));
     } catch (error) {
       console.error('Terminal error:', error);
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "assistant",
+      setMessages((prev) => prev.filter(m => m.id !== typingId).concat({
+        id: typingId,
+        role: "assistant",
         content: "⚠️ Connection error. Please try again.",
         timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+      }));
     } finally {
       setIsLoading(false);
     }
@@ -192,112 +154,97 @@ I'm connected to your Instantly data and ready to help with your daily & weekly 
     }
   };
 
-  const handleCommandClick = (command: string) => {
-    handleSubmit(command);
+  const copyToClipboard = async (text: string, id: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleRefresh = () => {
-    if (messages.length > 1) {
-      const lastUserMessage = [...messages].reverse().find(m => m.type === "user");
-      if (lastUserMessage) {
-        handleSubmit(`refresh ${lastUserMessage.content}`);
+  const formatContent = (content: string) => {
+    // Format markdown-style content
+    const lines = content.split('\n');
+    return lines.map((line, i) => {
+      // Headers
+      if (line.startsWith('### ')) {
+        return <h3 key={i} className="text-base font-semibold mt-4 mb-2">{line.slice(4)}</h3>;
       }
-    }
-  };
-
-  const formatMessageContent = (content: string) => {
-    // Split by lines and format markdown-like content
-    return content.split('\n').map((line, i) => {
-      // Bold text
-      const formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      // Italic text
-      const withItalic = formatted.replace(/_(.*?)_/g, '<em class="text-muted-foreground">$1</em>');
-      
-      return (
-        <p 
-          key={i} 
-          className={cn(
-            line.startsWith("•") || line.startsWith("   ") ? "ml-2" : "",
-            line.startsWith("---") ? "border-t border-border my-2" : "",
-            line.match(/^\d+\./) ? "mt-2" : ""
-          )}
-          dangerouslySetInnerHTML={{ __html: line.startsWith("---") ? "" : withItalic }}
-        />
-      );
+      if (line.startsWith('## ')) {
+        return <h2 key={i} className="text-lg font-semibold mt-4 mb-2">{line.slice(3)}</h2>;
+      }
+      // Bold
+      let formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>');
+      // Code blocks
+      formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-muted px-1.5 py-0.5 rounded text-sm font-mono">$1</code>');
+      // Emoji bullets
+      if (line.match(/^[🔴🟡🟢⚠️✅❌📊📈📉🚨💡•]/)) {
+        return <p key={i} className="ml-2 my-1" dangerouslySetInnerHTML={{ __html: formatted }} />;
+      }
+      // Numbered lists
+      if (line.match(/^\d+\./)) {
+        return <p key={i} className="ml-4 my-1" dangerouslySetInnerHTML={{ __html: formatted }} />;
+      }
+      // Dividers
+      if (line.startsWith('---')) {
+        return <hr key={i} className="my-3 border-border" />;
+      }
+      // Empty lines
+      if (!line.trim()) {
+        return <div key={i} className="h-2" />;
+      }
+      return <p key={i} className="my-1" dangerouslySetInnerHTML={{ __html: formatted }} />;
     });
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col p-6">
+    <div className="flex h-screen flex-col bg-background">
       {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
-            <Terminal className="h-6 w-6 text-primary" />
-            Campaign Terminal
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            12 commands for your daily & weekly campaign tasks
-          </p>
+      <header className="flex items-center justify-between border-b border-border px-6 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-purple-600">
+            <Sparkles className="h-4 w-4 text-white" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Campaign Terminal</h1>
+            <p className="text-xs text-muted-foreground">AI-powered campaign analysis</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="gap-1 text-emerald-400 border-emerald-400/50">
+          <Badge variant="outline" className="gap-1 text-emerald-500 border-emerald-500/30 bg-emerald-500/10">
             <Zap className="h-3 w-3" />
-            Live
+            Live Data
           </Badge>
-          <Badge variant="outline" className="gap-1 text-primary border-primary/50">
-            <Sparkles className="h-3 w-3" />
-            AI Ready
-          </Badge>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            onClick={handleRefresh}
-            disabled={isLoading || messages.length <= 1}
-          >
-            <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-          </Button>
           <Dialog open={showHelp} onOpenChange={setShowHelp}>
             <DialogTrigger asChild>
-              <Button variant="outline" size="icon" className="h-8 w-8">
+              <Button variant="ghost" size="icon" className="h-8 w-8">
                 <HelpCircle className="h-4 w-4" />
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-lg">
+            <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Terminal className="h-5 w-5" />
-                  Command Reference
-                </DialogTitle>
+                <DialogTitle>Commands & Examples</DialogTitle>
                 <DialogDescription>
-                  All available commands for the Campaign Terminal
+                  Use these commands or ask questions naturally
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 mt-4">
-                {Object.entries(COMMAND_HELP).map(([category, { commands }]) => (
-                  <div key={category}>
-                    <h3 className="text-sm font-semibold text-foreground mb-2">{category}</h3>
+              <div className="space-y-4 mt-4 max-h-[60vh] overflow-y-auto">
+                {COMMAND_HELP.map((cat) => (
+                  <div key={cat.category}>
+                    <h3 className="text-sm font-semibold text-foreground mb-2">{cat.category}</h3>
                     <div className="space-y-1">
-                      {commands.map((cmd) => (
+                      {cat.commands.map((cmd) => (
                         <button
                           key={cmd.cmd}
-                          className="w-full text-left px-3 py-2 rounded-md hover:bg-muted flex items-center justify-between group"
+                          className="w-full text-left px-3 py-2 rounded-lg hover:bg-muted flex items-center justify-between"
                           onClick={() => {
                             setShowHelp(false);
-                            handleSubmit(cmd.cmd.replace(" [command]", ""));
+                            if (!cmd.cmd.includes(' ')) {
+                              handleSubmit(cmd.cmd);
+                            }
                           }}
                         >
-                          <div className="flex items-center gap-2">
-                            <code className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                              {cmd.cmd}
-                            </code>
-                            {cmd.alias && (
-                              <code className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
-                                {cmd.alias}
-                              </code>
-                            )}
-                          </div>
+                          <code className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-md">
+                            {cmd.cmd}
+                          </code>
                           <span className="text-xs text-muted-foreground">{cmd.desc}</span>
                         </button>
                       ))}
@@ -308,135 +255,182 @@ I'm connected to your Instantly data and ready to help with your daily & weekly 
             </DialogContent>
           </Dialog>
         </div>
-      </div>
-
-      {/* Quick Commands */}
-      <div className="mb-4">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "daily" | "weekly")}>
-          <TabsList className="mb-2">
-            <TabsTrigger value="daily" className="gap-1">
-              <CalendarDays className="h-3.5 w-3.5" />
-              Daily
-            </TabsTrigger>
-            <TabsTrigger value="weekly" className="gap-1">
-              <CalendarClock className="h-3.5 w-3.5" />
-              Weekly
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        
-        <div className="flex flex-wrap gap-2">
-          {(activeTab === "daily" ? DAILY_COMMANDS : WEEKLY_COMMANDS).map((cmd) => {
-            const Icon = cmd.icon;
-            return (
-              <Button
-                key={cmd.command}
-                variant="outline"
-                size="sm"
-                onClick={() => handleCommandClick(cmd.command)}
-                disabled={isLoading}
-                className="gap-1.5"
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {cmd.label}
-                {cmd.shortcut && (
-                  <kbd className="ml-1 text-[10px] bg-muted px-1 py-0.5 rounded">
-                    {cmd.shortcut}
-                  </kbd>
-                )}
-              </Button>
-            );
-          })}
-        </div>
-      </div>
+      </header>
 
       {/* Chat Area */}
-      <Card className="flex flex-1 flex-col border-border bg-card overflow-hidden">
-        <ScrollArea className="flex-1 p-4" ref={scrollRef}>
-          <div className="space-y-4">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  "flex",
-                  message.type === "user" ? "justify-end" : "justify-start"
-                )}
-              >
-                <div
-                  className={cn(
-                    "max-w-[85%] rounded-xl px-4 py-3",
-                    message.type === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted/50 border border-border text-foreground"
-                  )}
+      <ScrollArea ref={scrollRef} className="flex-1">
+        <div className="mx-auto max-w-3xl px-4 py-6">
+          {messages.length === 0 ? (
+            // Empty state
+            <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 mb-6">
+                <Sparkles className="h-8 w-8 text-white" />
+              </div>
+              <h2 className="text-2xl font-semibold text-foreground mb-2">
+                Campaign Terminal
+              </h2>
+              <p className="text-muted-foreground mb-8 max-w-md">
+                Ask questions about your campaigns in natural language or use quick commands
+              </p>
+              
+              {/* Quick Actions */}
+              <div className="grid grid-cols-2 gap-3 w-full max-w-md mb-6">
+                <button
+                  onClick={() => handleSubmit("daily")}
+                  className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left"
                 >
-                  {message.command && (
-                    <div className="mb-2 flex items-center gap-2">
-                      <Badge variant="outline" className="text-xs">
-                        {message.command}
-                      </Badge>
+                  <CalendarDays className="h-5 w-5 text-primary" />
+                  <div>
+                    <div className="font-medium text-sm">Daily Report</div>
+                    <div className="text-xs text-muted-foreground">Today&apos;s metrics</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => handleSubmit("weekly")}
+                  className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left"
+                >
+                  <Calendar className="h-5 w-5 text-primary" />
+                  <div>
+                    <div className="font-medium text-sm">Weekly Report</div>
+                    <div className="text-xs text-muted-foreground">7-day analysis</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Suggestion chips */}
+              <div className="flex flex-wrap gap-2 justify-center">
+                {QUICK_SUGGESTIONS.slice(2).map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => handleSubmit(s.query)}
+                    className="px-3 py-1.5 rounded-full border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            // Messages
+            <div className="space-y-6">
+              {messages.map((message) => (
+                <div key={message.id} className={cn(
+                  "flex gap-4",
+                  message.role === "user" ? "justify-end" : "justify-start"
+                )}>
+                  {message.role === "assistant" && (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-purple-600">
+                      <Bot className="h-4 w-4 text-white" />
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap text-sm space-y-1">
-                    {formatMessageContent(message.content)}
-                  </div>
-                  <div
-                    className={cn(
-                      "mt-2 text-xs",
-                      message.type === "user"
-                        ? "text-primary-foreground/70"
-                        : "text-muted-foreground"
+                  
+                  <div className={cn(
+                    "group relative max-w-[85%] rounded-2xl px-4 py-3",
+                    message.role === "user" 
+                      ? "bg-primary text-primary-foreground" 
+                      : "bg-muted/50"
+                  )}>
+                    {message.isTyping ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span className="text-sm text-muted-foreground">Analyzing campaigns...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className={cn(
+                          "text-sm whitespace-pre-wrap",
+                          message.role === "assistant" && "prose prose-sm dark:prose-invert max-w-none"
+                        )}>
+                          {message.role === "assistant" 
+                            ? formatContent(message.content)
+                            : message.content
+                          }
+                        </div>
+                        
+                        {/* Copy button for assistant messages */}
+                        {message.role === "assistant" && !message.isTyping && (
+                          <button
+                            onClick={() => copyToClipboard(message.content, message.id)}
+                            className="absolute -bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md bg-background border border-border hover:bg-muted"
+                          >
+                            {copiedId === message.id ? (
+                              <Check className="h-3 w-3 text-emerald-500" />
+                            ) : (
+                              <Copy className="h-3 w-3 text-muted-foreground" />
+                            )}
+                          </button>
+                        )}
+                      </>
                     )}
-                  >
-                    {message.timestamp.toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
                   </div>
-                </div>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-xl bg-muted/50 border border-border px-4 py-3">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <span className="text-sm text-muted-foreground">Analyzing campaigns...</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </ScrollArea>
 
-        {/* Input */}
-        <div className="border-t border-border p-4">
-          <div className="flex gap-2">
+                  {message.role === "user" && (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                      <User className="h-4 w-4 text-primary" />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+
+      {/* Input Area */}
+      <div className="border-t border-border bg-background/80 backdrop-blur-sm">
+        <div className="mx-auto max-w-3xl px-4 py-4">
+          {/* Quick suggestions when there are messages */}
+          {messages.length > 0 && (
+            <div className="flex gap-2 mb-3 overflow-x-auto pb-2 scrollbar-none">
+              {QUICK_SUGGESTIONS.map((s) => (
+                <button
+                  key={s.label}
+                  onClick={() => handleSubmit(s.query)}
+                  disabled={isLoading}
+                  className="shrink-0 px-3 py-1.5 rounded-full border border-border bg-card text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+          
+          {/* Input */}
+          <div className="relative flex items-end gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background">
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Auto-resize
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+              }}
               onKeyDown={handleKeyDown}
-              placeholder="Type a command (d, w, low leads, benchmarks...)"
-              className="flex-1 resize-none rounded-lg border border-input bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="Ask about your campaigns..."
+              className="flex-1 resize-none border-0 bg-transparent px-3 py-2 text-sm focus:outline-none min-h-[44px] max-h-[200px]"
               rows={1}
+              disabled={isLoading}
             />
             <Button
               onClick={() => handleSubmit()}
               disabled={!input.trim() || isLoading}
-              className="gap-2"
+              size="icon"
+              className="h-10 w-10 shrink-0 rounded-xl bg-primary hover:bg-primary/90"
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Send className="h-4 w-4" />
+                <ArrowUp className="h-4 w-4" />
               )}
-              Send
             </Button>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Press Enter to send • Shortcuts: <kbd className="px-1 py-0.5 bg-muted rounded">d</kbd> = daily, <kbd className="px-1 py-0.5 bg-muted rounded">w</kbd> = weekly
+          
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            Try: &quot;daily&quot;, &quot;weekly&quot;, or ask any question about your campaigns
           </p>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

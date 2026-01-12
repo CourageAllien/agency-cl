@@ -309,13 +309,12 @@ export function classifyClient(
     severity = "low";
     reasoning = [`Only ${totalSent} emails sent from active campaigns, need more data`];
   }
-  // Deliverability Issues
-  else if (bounceRate > 5 || avgInboxHealth < BENCHMARKS.HEALTHY_INBOX) {
+  // Deliverability Issues - ONLY check bounce rate
+  // Note: Inbox health is shared across clients, not client-specific
+  else if (bounceRate > 5) {
     bucket = "DELIVERABILITY_ISSUE";
-    severity = bounceRate > 10 || avgInboxHealth < 50 ? "critical" : "high";
-    reasoning = [];
-    if (bounceRate > 5) reasoning.push(`High bounce rate: ${bounceRate.toFixed(1)}%`);
-    if (avgInboxHealth < BENCHMARKS.HEALTHY_INBOX) reasoning.push(`Low inbox health: ${avgInboxHealth}%`);
+    severity = bounceRate > 10 ? "critical" : "high";
+    reasoning = [`High bounce rate: ${bounceRate.toFixed(1)}%`];
   }
   // Copy Issues - low reply rate
   else if (replyRate < BENCHMARKS.CRITICAL_REPLY_RATE) {

@@ -140,7 +140,8 @@ interface WarmupAggregateStats {
 // Custom Tags
 interface RawCustomTag {
   id: string;
-  name: string;
+  name?: string;
+  label?: string; // Some APIs use label instead of name
   color?: string;
   timestamp_created?: string;
 }
@@ -149,7 +150,7 @@ interface RawTagMapping {
   id: string;
   tag_id: string;
   resource_id: string;
-  resource_type: 'account' | 'campaign';
+  resource_type: 'account' | 'campaign' | number; // API returns numeric: 1=account, 2=campaign
 }
 
 // Lead Types
@@ -546,9 +547,14 @@ class InstantlyService {
     const raw = this.extractArray<RawCustomTag>(response.data);
     console.log(`[Instantly API v2] Found ${raw.length} custom tags`);
     
+    // Log first tag for debugging
+    if (raw.length > 0) {
+      console.log(`[Instantly API v2] Sample tag:`, JSON.stringify(raw[0]));
+    }
+    
     const tags: InstantlyCustomTag[] = raw.map(t => ({
       id: t.id,
-      name: t.name,
+      name: t.name || t.label || t.id, // Fallback to id if no name
       color: t.color,
     }));
     
@@ -568,12 +574,27 @@ class InstantlyService {
     const raw = this.extractArray<RawTagMapping>(response.data);
     console.log(`[Instantly API v2] Found ${raw.length} tag mappings`);
     
-    const mappings: InstantlyTagMapping[] = raw.map(m => ({
-      id: m.id,
-      tag_id: m.tag_id,
-      resource_id: m.resource_id,
-      resource_type: m.resource_type,
-    }));
+    // Log first mapping for debugging
+    if (raw.length > 0) {
+      console.log(`[Instantly API v2] Sample tag mapping:`, JSON.stringify(raw[0]));
+    }
+    
+    // Convert numeric resource_type to string: 1=account, 2=campaign
+    const mappings: InstantlyTagMapping[] = raw.map(m => {
+      let resourceType: 'account' | 'campaign';
+      if (typeof m.resource_type === 'number') {
+        resourceType = m.resource_type === 1 ? 'account' : 'campaign';
+      } else {
+        resourceType = m.resource_type;
+      }
+      
+      return {
+        id: m.id,
+        tag_id: m.tag_id,
+        resource_id: m.resource_id,
+        resource_type: resourceType,
+      };
+    });
     
     return { data: mappings, status: response.status };
   }

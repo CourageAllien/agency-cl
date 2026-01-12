@@ -181,6 +181,48 @@ export interface TerminalResponse {
     cached: boolean;
     campaignCount?: number;
     issueCount?: number;
+    // Raw data for full view pages
+    rawCampaigns?: Array<{
+      name: string;
+      id: string;
+      status: string;
+      sent: number;
+      contacted: number;
+      uncontacted: number;
+      totalLeads: number;
+      replies: number;
+      replyRate: number;
+      opportunities: number;
+      replyToOpp: number;
+      bounced: number;
+      bounceRate: number;
+      positiveReplies: number;
+      meetings: number;
+      posReplyToMeeting: number;
+      classification: string;
+      reason: string;
+      action: string;
+      urgency: string;
+    }>;
+    rawAccounts?: Array<{
+      email: string;
+      status: string;
+      statusMessage?: string;
+      warmupStatus: number;
+      healthScore: number;
+      dailyLimit: number;
+      issues: string[];
+      severity: string;
+      affectedCampaigns: string[];
+      actions: string[];
+    }>;
+    summary?: {
+      total: number;
+      healthy: number;
+      issues: number;
+      disconnected: number;
+      lowHealth: number;
+    };
   };
 }
 

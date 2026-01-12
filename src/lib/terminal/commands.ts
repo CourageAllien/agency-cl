@@ -540,6 +540,9 @@ async function handleCampaignListCommand(forceRefresh: boolean): Promise<Termina
   // Combine into full response
   const fullResponse = campaignDetails + summaryText;
   
+  // Add link to full view at the bottom
+  const viewAllLink = `\n\n---\n\n👉 **[View All ${activeCampaigns.length} Campaigns →](/terminal/campaigns)**\n_Click to see full list with filters and details_`;
+  
   // Create response with the detailed text
   const response: TerminalResponse = {
     type: 'success',
@@ -551,7 +554,7 @@ async function handleCampaignListCommand(forceRefresh: boolean): Promise<Termina
       type: 'summary',
       items: [{
         name: 'Full Analysis',
-        details: [fullResponse]
+        details: [fullResponse + viewAllLink]
       }]
     }],
     summary: [],
@@ -559,7 +562,8 @@ async function handleCampaignListCommand(forceRefresh: boolean): Promise<Termina
       timestamp: 'just now',
       cached: false,
       campaignCount: activeCampaigns.length,
-      issueCount: summary.urgent.length + summary.byClassification['NEED NEW LIST'].length
+      issueCount: summary.urgent.length + summary.byClassification['NEED NEW LIST'].length,
+      rawCampaigns: sorted // Include raw data for full view page
     }
   };
   
@@ -1701,12 +1705,35 @@ async function handleInboxHealthCommand(forceRefresh: boolean): Promise<Terminal
       `✅ Healthy: ${stats.healthy}`,
       `---`,
       `Lost Capacity: ~${stats.totalLostCapacity} emails/day`,
-      ...issueBreakdown
+      ...issueBreakdown,
+      ``,
+      `---`,
+      `👉 **[View All ${stats.total} Inboxes →](/terminal/inboxes)**`,
+      `_Click to see full list with filters and details_`
     ],
     metadata: {
       timestamp: 'just now',
       cached: false,
-      issueCount: stats.withIssues
+      issueCount: stats.withIssues,
+      rawAccounts: processedInboxes.map(inbox => ({
+        email: inbox.email,
+        status: inbox.status,
+        statusMessage: inbox.statusMessage,
+        warmupStatus: inbox.warmupStatus,
+        healthScore: inbox.healthScore || 0,
+        dailyLimit: inbox.dailyLimit,
+        issues: inbox.issues.map(i => i.message),
+        severity: inbox.severity,
+        affectedCampaigns: inbox.affectedCampaigns,
+        actions: inbox.actions.map(a => a.label)
+      })),
+      summary: {
+        total: stats.total,
+        healthy: stats.healthy,
+        issues: stats.withIssues,
+        disconnected: issueTypes.DISCONNECTED,
+        lowHealth: issueTypes.LOW_HEALTH
+      }
     }
   };
   

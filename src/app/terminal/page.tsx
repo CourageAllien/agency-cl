@@ -172,12 +172,41 @@ export default function TerminalPage() {
       if (line.startsWith('## ')) {
         return <h2 key={i} className="text-lg font-semibold mt-4 mb-2">{line.slice(3)}</h2>;
       }
+      
+      // Check for markdown links [text](url)
+      const linkMatch = line.match(/\[([^\]]+)\]\(([^)]+)\)/);
+      if (linkMatch) {
+        const beforeLink = line.substring(0, linkMatch.index);
+        const linkText = linkMatch[1];
+        const linkUrl = linkMatch[2];
+        const afterLink = line.substring((linkMatch.index || 0) + linkMatch[0].length);
+        
+        // Format surrounding text
+        let formattedBefore = beforeLink.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>');
+        let formattedAfter = afterLink.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>');
+        
+        return (
+          <p key={i} className="my-2">
+            <span dangerouslySetInnerHTML={{ __html: formattedBefore }} />
+            <a 
+              href={linkUrl} 
+              className="inline-flex items-center gap-1 text-primary hover:text-primary/80 underline underline-offset-4 font-medium transition-colors"
+            >
+              {linkText}
+            </a>
+            <span dangerouslySetInnerHTML={{ __html: formattedAfter }} />
+          </p>
+        );
+      }
+      
       // Bold
       let formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>');
       // Code blocks
       formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-muted px-1.5 py-0.5 rounded text-sm font-mono">$1</code>');
+      // Italics (for hints like "_Click to see..._")
+      formatted = formatted.replace(/_([^_]+)_/g, '<em class="text-muted-foreground text-sm">$1</em>');
       // Emoji bullets
-      if (line.match(/^[🔴🟡🟢⚠️✅❌📊📈📉🚨💡•]/)) {
+      if (line.match(/^[🔴🟡🟢⚠️✅❌📊📈📉🚨💡👉•]/)) {
         return <p key={i} className="ml-2 my-1" dangerouslySetInnerHTML={{ __html: formatted }} />;
       }
       // Numbered lists
@@ -185,7 +214,7 @@ export default function TerminalPage() {
         return <p key={i} className="ml-4 my-1" dangerouslySetInnerHTML={{ __html: formatted }} />;
       }
       // Dividers
-      if (line.startsWith('---')) {
+      if (line.startsWith('---') || line.startsWith('━━━') || line.startsWith('───')) {
         return <hr key={i} className="my-3 border-border" />;
       }
       // Empty lines
